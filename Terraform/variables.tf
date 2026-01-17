@@ -91,3 +91,10 @@ variable "key_vault_sku" {
   default     = "standard"
 }
 
+# #############################
+# Variables - Virtual Machine
+# #############################
+variable "vm_azure_ad_group_object_id" {
+  description = "Object ID of the Azure AD group that will have access to the Virtual Machine via Azure AD login."
+  type        = string
+}

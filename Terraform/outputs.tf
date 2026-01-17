@@ -28,6 +28,49 @@ output "vnet_name" {
 }
 
 # #############################################
+# Outputs - Azure Bastion
+# #############################################
+
+output "bastion_host_id" {
+  description = "ID of the Azure Bastion Host."
+  value       = azurerm_bastion_host.bastion.id
+}
+
+output "bastion_host_name" {
+  description = "Name of the Azure Bastion Host."
+  value       = azurerm_bastion_host.bastion.name
+}
+
+output "bastion_public_ip" {
+  description = "Public IP address of the Azure Bastion Host."
+  value       = azurerm_public_ip.bastion.ip_address
+}
+
+# #############################################
+# Outputs - Virtual Machine
+# #############################################
+
+output "vm_id" {
+  description = "ID of the Virtual Machine."
+  value       = azurerm_windows_virtual_machine.vm.id
+}
+
+output "vm_name" {
+  description = "Name of the Virtual Machine."
+  value       = azurerm_windows_virtual_machine.vm.name
+}
+
+output "vm_private_ip" {
+  description = "Private IP address of the Virtual Machine."
+  value       = azurerm_network_interface.vm.private_ip_address
+}
+
+output "vm_identity_principal_id" {
+  description = "Principal ID of the VM's system-assigned identity."
+  value       = azurerm_windows_virtual_machine.vm.identity[0].principal_id
+}
+
+# #############################################
 # Outputs - Private Endpoints
 # #############################################
 

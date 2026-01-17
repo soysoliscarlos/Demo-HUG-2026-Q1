@@ -54,36 +54,6 @@ resource "azurerm_private_dns_zone_virtual_network_link" "keyvault_link" {
   tags                  = local.etiquetas_comunes
 }
 
-# #############################################
-# Virtual Network Links to remote VNet (data.azurerm_virtual_network.vnet-vm)
-# #############################################
-
-resource "azurerm_private_dns_zone_virtual_network_link" "blob_link_vm" {
-  name                  = "blob-vnet-vm-link"
-  resource_group_name   = azurerm_resource_group.rg.name
-  private_dns_zone_name = azurerm_private_dns_zone.blob.name
-  virtual_network_id    = data.azurerm_virtual_network.vnet-vm.id
-  registration_enabled  = false
-  tags                  = local.etiquetas_comunes
-}
-
-resource "azurerm_private_dns_zone_virtual_network_link" "file_link_vm" {
-  name                  = "file-vnet-vm-link"
-  resource_group_name   = azurerm_resource_group.rg.name
-  private_dns_zone_name = azurerm_private_dns_zone.file.name
-  virtual_network_id    = data.azurerm_virtual_network.vnet-vm.id
-  registration_enabled  = false
-  tags                  = local.etiquetas_comunes
-}
-
-resource "azurerm_private_dns_zone_virtual_network_link" "keyvault_link_vm" {
-  name                  = "keyvault-vnet-vm-link"
-  resource_group_name   = azurerm_resource_group.rg.name
-  private_dns_zone_name = azurerm_private_dns_zone.keyvault.name
-  virtual_network_id    = data.azurerm_virtual_network.vnet-vm.id
-  registration_enabled  = false
-  tags                  = local.etiquetas_comunes
-}
 
 # #############################################
 # Private Endpoint - Storage Account (Blob)

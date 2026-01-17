@@ -6,14 +6,7 @@ resource "azurerm_storage_account" "storage" {
   account_replication_type = "LRS"
 
   # Habilitar acceso de red privado
-  # public_network_access_enabled = true
-  public_network_access_enabled = false
+  public_network_access_enabled = true
 
   tags = local.etiquetas_comunes
-}
-
-resource "azurerm_storage_container" "container" {
-  name                  = lower(var.container_name)
-  storage_account_id    = azurerm_storage_account.storage.id
-  container_access_type = var.container_access_type
 }
