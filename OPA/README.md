@@ -1,33 +1,386 @@
-# Guía de Evaluación de Política OPA
+# Guía Completa de OPA para Validación de Políticas Terraform
 
-Esta guía explica cómo usar la política OPA `deny_public_internet.rego` para validar que los recursos de Terraform no tengan acceso público habilitado.
+Esta guía explica cómo instalar, configurar y usar Open Policy Agent (OPA) con la política `deny_public_internet.rego` para validar que los recursos de Terraform no tengan acceso público habilitado.
 
 ## 📋 Tabla de Contenidos
 
-1. [Prerrequisitos](#prerrequisitos)
-2. [Documentación del Archivo Rego](#documentación-del-archivo-rego)
-3. [Documentación del Script PowerShell](#documentación-del-script-powershell)
-4. [Métodos de Evaluación](#métodos-de-evaluación)
-5. [Qué Valida la Política](#qué-valida-la-política)
-6. [Integración con CI/CD](#integración-con-cicd)
-7. [Solución de Problemas](#solución-de-problemas)
+1. [Instalación de OPA desde Cero](#instalación-de-opa-desde-cero)
+2. [Configuración Inicial](#configuración-inicial)
+3. [Prerrequisitos](#prerrequisitos)
+4. [Documentación del Archivo Rego](#documentación-del-archivo-rego)
+5. [Documentación del Script PowerShell](#documentación-del-script-powershell)
+6. [Métodos de Evaluación](#métodos-de-evaluación)
+7. [Qué Valida la Política](#qué-valida-la-política)
+8. [Integración con CI/CD](#integración-con-cicd)
+9. [Solución de Problemas](#solución-de-problemas)
+
+---
+
+## Instalación de OPA desde Cero
+
+### ¿Qué es OPA?
+
+Open Policy Agent (OPA) es un motor de políticas de código abierto que unifica la aplicación de políticas en toda la pila tecnológica. OPA permite definir políticas como código y evaluarlas contra datos estructurados (como planes de Terraform).
+
+### Requisitos del Sistema
+
+- **Sistema Operativo**: Windows, Linux, o macOS
+- **Arquitectura**: x86_64 (amd64) o ARM64
+- **Permisos**: Permisos de escritura para instalar y ejecutar binarios
+- **Terraform**: Versión 0.12 o superior (para generar planes en formato JSON)
+
+### Método 1: Instalación en Windows
+
+#### Opción A: Descarga Manual (Recomendado)
+
+1. **Descargar OPA CLI**:
+   - Visita: https://www.openpolicyagent.org/docs/latest/#running-opa
+   - O descarga directamente desde: https://github.com/open-policy-agent/opa/releases
+   - Busca la versión más reciente (ej: `opa_windows_amd64.exe`)
+   - Descarga el archivo ejecutable
+
+2. **Instalar OPA**:
+   ```powershell
+   # Crear directorio para OPA (opcional, pero recomendado)
+   New-Item -ItemType Directory -Force -Path "$env:ProgramFiles\OPA"
+   
+   # Mover el ejecutable descargado al directorio
+   # Renombrar el archivo descargado a 'opa.exe'
+   Move-Item -Path ".\opa_windows_amd64.exe" -Destination "$env:ProgramFiles\OPA\opa.exe"
+   ```
+
+3. **Agregar OPA al PATH**:
+   ```powershell
+   # Agregar al PATH del usuario actual
+   $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
+   $newPath = "$env:ProgramFiles\OPA;$currentPath"
+   [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+   
+   # O agregar al PATH del sistema (requiere permisos de administrador)
+   # $currentPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+   # $newPath = "$env:ProgramFiles\OPA;$currentPath"
+   # [Environment]::SetEnvironmentVariable("Path", $newPath, "Machine")
+   ```
+
+4. **Verificar Instalación**:
+   ```powershell
+   # Cerrar y reabrir PowerShell para que los cambios en PATH surtan efecto
+   # Luego verificar:
+   opa version
+   ```
+   
+   Deberías ver algo como:
+   ```
+   Version: 0.62.0
+   Build Commit: abc123...
+   Build Timestamp: 2024-01-01T00:00:00Z
+   Build Hostname: build-host
+   ```
+
+#### Opción B: Usando Chocolatey
+
+Si tienes Chocolatey instalado:
+
+```powershell
+# Instalar OPA usando Chocolatey
+choco install opa
+
+# Verificar instalación
+opa version
+```
+
+#### Opción C: Usando Scoop
+
+Si tienes Scoop instalado:
+
+```powershell
+# Agregar bucket de extras (si no está agregado)
+scoop bucket add extras
+
+# Instalar OPA
+scoop install opa
+
+# Verificar instalación
+opa version
+```
+
+#### Opción D: Usando winget (Windows Package Manager)
+
+```powershell
+# Instalar OPA usando winget
+winget install OpenPolicyAgent.OPA
+
+# Verificar instalación
+opa version
+```
+
+### Método 2: Instalación en Linux
+
+#### Opción A: Descarga Manual
+
+```bash
+# Descargar la última versión
+curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64
+
+# Hacer ejecutable
+chmod +x opa
+
+# Mover a un directorio en PATH
+sudo mv opa /usr/local/bin/
+
+# Verificar instalación
+opa version
+```
+
+#### Opción B: Usando el Repositorio de Debian/Ubuntu
+
+```bash
+# Agregar la clave GPG
+curl -fsSL https://download.opensuse.org/repositories/home:/pabluk:/OPA/Debian_12/Release.key | sudo gpg --dearmor -o /usr/share/keyrings/opa-archive-keyring.gpg
+
+# Agregar el repositorio
+echo "deb [signed-by=/usr/share/keyrings/opa-archive-keyring.gpg] https://download.opensuse.org/repositories/home:/pabluk:/OPA/Debian_12/ /" | sudo tee /etc/apt/sources.list.d/opa.list
+
+# Actualizar e instalar
+sudo apt update
+sudo apt install opa
+
+# Verificar instalación
+opa version
+```
+
+#### Opción C: Usando el Repositorio de Red Hat/CentOS/Fedora
+
+```bash
+# Agregar el repositorio
+sudo tee /etc/yum.repos.d/opa.repo <<EOF
+[opa]
+name=OPA
+baseurl=https://download.opensuse.org/repositories/home:/pabluk:/OPA/CentOS_8/
+enabled=1
+gpgcheck=1
+gpgkey=https://download.opensuse.org/repositories/home:/pabluk:/OPA/CentOS_8/repodata/repomd.xml.key
+EOF
+
+# Instalar
+sudo yum install opa
+
+# Verificar instalación
+opa version
+```
+
+### Método 3: Instalación en macOS
+
+#### Opción A: Usando Homebrew (Recomendado)
+
+```bash
+# Instalar OPA
+brew install opa
+
+# Verificar instalación
+opa version
+```
+
+#### Opción B: Descarga Manual
+
+```bash
+# Descargar la última versión
+curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_darwin_amd64
+
+# Hacer ejecutable
+chmod +x opa
+
+# Mover a un directorio en PATH
+sudo mv opa /usr/local/bin/
+
+# Verificar instalación
+opa version
+```
+
+### Método 4: Instalación usando Docker
+
+Si prefieres usar OPA en un contenedor Docker:
+
+```powershell
+# En Windows PowerShell
+docker run -it --rm openpolicyagent/opa version
+
+# Para evaluar políticas, monta los archivos como volúmenes
+docker run -it --rm `
+  -v ${PWD}:/workspace `
+  -w /workspace `
+  openpolicyagent/opa eval `
+    --input /workspace/../Terraform/tfplan.json `
+    --data /workspace/deny_public_internet.rego `
+    --format pretty `
+    "data.terraform.deny_public_internet.deny"
+```
+
+### Verificación de la Instalación
+
+Después de instalar OPA, verifica que funciona correctamente:
+
+```powershell
+# Verificar versión
+opa version
+
+# Probar con una política simple
+echo 'package test
+deny contains msg if {
+    input.message == "hello"
+    msg := "found hello"
+}' > test.rego
+
+echo '{"message": "hello"}' | opa eval --input - --data test.rego --format pretty "data.test.deny"
+
+# Deberías ver: ["found hello"]
+
+# Limpiar
+Remove-Item test.rego
+```
+
+### Solución de Problemas de Instalación
+
+#### Error: "opa: command not found" o "opa no se reconoce como comando"
+
+**Causa**: OPA no está en el PATH del sistema.
+
+**Solución**:
+1. Verifica que el ejecutable existe:
+   ```powershell
+   # Windows
+   Test-Path "$env:ProgramFiles\OPA\opa.exe"
+   
+   # Linux/macOS
+   which opa
+   ```
+
+2. Verifica el PATH:
+   ```powershell
+   # Windows PowerShell
+   $env:Path -split ';' | Select-String -Pattern "OPA"
+   
+   # Linux/macOS
+   echo $PATH | grep -i opa
+   ```
+
+3. Si OPA no está en el PATH:
+   - **Windows**: Agrega manualmente el directorio a las variables de entorno del sistema
+   - **Linux/macOS**: Asegúrate de que el binario esté en `/usr/local/bin` o agrega el directorio al PATH en `~/.bashrc` o `~/.zshrc`
+
+4. Reinicia la terminal después de modificar el PATH
+
+#### Error: "Permission denied" (Linux/macOS)
+
+**Causa**: El archivo no tiene permisos de ejecución o no tienes permisos para escribir en el directorio.
+
+**Solución**:
+```bash
+# Dar permisos de ejecución
+chmod +x opa
+
+# O instalar en un directorio donde tengas permisos
+mkdir -p ~/bin
+mv opa ~/bin/
+export PATH="$HOME/bin:$PATH"
+```
+
+#### Error: "The system cannot find the file specified" (Windows)
+
+**Causa**: El archivo no existe o la ruta es incorrecta.
+
+**Solución**:
+1. Verifica que descargaste el archivo correcto para tu arquitectura (amd64 vs arm64)
+2. Verifica que el archivo se renombró correctamente a `opa.exe`
+3. Verifica que el directorio existe y el archivo está ahí
+
+---
+
+## Configuración Inicial
+
+### Estructura de Directorios
+
+Asegúrate de tener la siguiente estructura de directorios:
+
+```
+Demo-HUG-2026-Q1/
+├── OPA/
+│   ├── README.md                    # Este archivo
+│   ├── deny_public_internet.rego    # Política OPA
+│   └── evaluar_politica.ps1         # Script de evaluación
+└── Terraform/
+    ├── main.tf
+    ├── storage.tf
+    ├── key_vault.tf
+    └── tfplan.json                  # Plan JSON (generado)
+```
+
+### Configuración del Entorno
+
+1. **Navegar al directorio OPA**:
+   ```powershell
+   cd OPA
+   ```
+
+2. **Verificar que los archivos existen**:
+   ```powershell
+   Test-Path "deny_public_internet.rego"
+   Test-Path "evaluar_politica.ps1"
+   ```
+
+3. **Verificar permisos de ejecución** (Linux/macOS):
+   ```bash
+   chmod +x evaluar_politica.ps1
+   ```
+
+### Configuración de PowerShell (Windows)
+
+Si estás usando Windows, asegúrate de que PowerShell puede ejecutar scripts:
+
+```powershell
+# Verificar política de ejecución
+Get-ExecutionPolicy
+
+# Si es "Restricted", cambiar a "RemoteSigned" o "Bypass" (solo para desarrollo)
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
 
 ---
 
 ## Prerrequisitos
 
-1. **OPA CLI instalado**: Descarga desde https://www.openpolicyagent.org/docs/latest/#running-opa
+Antes de usar la política OPA, asegúrate de tener:
+
+1. **OPA CLI instalado y configurado**: Ver sección [Instalación de OPA desde Cero](#instalación-de-opa-desde-cero)
    ```powershell
    # Verificar instalación
    opa version
    ```
 
-2. **Plan de Terraform en formato JSON**: 
+2. **Terraform instalado**: Versión 0.12 o superior
    ```powershell
-   cd ..\Terraform
-   terraform plan -out=tfplan.bin
-   terraform show -json tfplan.bin > tfplan.json
+   terraform version
    ```
+
+3. **Plan de Terraform en formato JSON**: 
+   ```powershell
+   # Navegar al directorio Terraform
+   cd ..\Terraform
+   
+   # Generar plan binario
+   terraform init
+   terraform plan -out=tfplan.bin
+   
+   # Convertir a JSON
+   terraform show -json tfplan.bin > tfplan.json
+   
+   # Volver al directorio OPA
+   cd ..\OPA
+   ```
+
+4. **Archivos de política y script**:
+   - `deny_public_internet.rego` debe estar en el directorio `OPA`
+   - `evaluar_politica.ps1` debe estar en el directorio `OPA`
 
 ---
 
@@ -275,7 +628,7 @@ El script `evaluar_politica.ps1` proporciona una interfaz amigable con validacio
 
 ```powershell
 # Desde la carpeta OPA
-cd DemoHashiTalkEspana2026\OPA
+cd OPA
 
 # Evaluación básica (muestra todas las violaciones)
 .\evaluar_politica.ps1
@@ -410,7 +763,7 @@ Ejecutando evaluación...
 - task: PowerShell@2
   displayName: 'Evaluar Política OPA'
   inputs:
-    filePath: '$(System.DefaultWorkingDirectory)/DemoHashiTalkEspana2026/OPA/evaluar_politica.ps1'
+    filePath: '$(System.DefaultWorkingDirectory)/OPA/evaluar_politica.ps1'
     arguments: '-FailOnViolation'
     failOnStderr: true
   continueOnError: false
@@ -419,9 +772,15 @@ Ejecutando evaluación...
 ### GitHub Actions
 
 ```yaml
+- name: Instalar OPA
+  run: |
+    curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64
+    chmod +x opa
+    sudo mv opa /usr/local/bin/
+
 - name: Evaluar Política OPA
   run: |
-    cd DemoHashiTalkEspana2026/OPA
+    cd OPA
     pwsh -File evaluar_politica.ps1 -FailOnViolation
   continue-on-error: false
 ```
@@ -430,7 +789,7 @@ Ejecutando evaluación...
 
 ```powershell
 # En Azure DevOps, GitHub Actions, etc.
-cd DemoHashiTalkEspana2026\OPA
+cd OPA
 .\evaluar_politica.ps1 -FailOnViolation
 
 if ($LASTEXITCODE -ne 0) {
@@ -447,8 +806,15 @@ if ($LASTEXITCODE -ne 0) {
 **Causa**: OPA CLI no está instalado o no está en las variables de entorno PATH.
 
 **Solución**:
-1. Descarga OPA desde https://www.openpolicyagent.org/docs/latest/#running-opa
-2. En Windows, agrega el directorio de OPA a la variable de entorno PATH
+1. Sigue las instrucciones en la sección [Instalación de OPA desde Cero](#instalación-de-opa-desde-cero)
+2. Verifica que OPA está en el PATH:
+   ```powershell
+   # Windows PowerShell
+   $env:Path -split ';' | Select-String -Pattern "OPA"
+   
+   # Linux/macOS
+   which opa
+   ```
 3. Reinicia la terminal/PowerShell después de agregar al PATH
 4. Verifica con: `opa version`
 
@@ -496,6 +862,21 @@ terraform show -json tfplan.bin > tfplan.json
 .\evaluar_politica.ps1 -FailOnViolation
 ```
 
+### Error de permisos en PowerShell (Windows)
+**Causa**: La política de ejecución de PowerShell está configurada como "Restricted".
+
+**Solución**:
+```powershell
+# Verificar política actual
+Get-ExecutionPolicy
+
+# Cambiar política (solo para el usuario actual)
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+# O ejecutar el script con bypass temporal
+powershell -ExecutionPolicy Bypass -File .\evaluar_politica.ps1
+```
+
 ---
 
 ## Prueba Rápida
@@ -532,3 +913,5 @@ Para probar que la política funciona correctamente:
 - [Lenguaje Rego](https://www.openpolicyagent.org/docs/latest/policy-language/)
 - [Terraform Plan Format](https://www.terraform.io/docs/internals/json-format.html)
 - [Azure Resource Manager Terraform Provider](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs)
+- [OPA GitHub Releases](https://github.com/open-policy-agent/opa/releases)
+- [OPA Playground](https://play.openpolicyagent.org/) - Para probar políticas Rego en línea
