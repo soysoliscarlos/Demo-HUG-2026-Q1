@@ -272,7 +272,7 @@ Para usar en CI/CD (falla si hay violaciones):
 - Salida vacía: no hay violaciones
 - Salida con violaciones: revisa y corrige flags de acceso público
 
-Para más detalles, consulta [`OPA/README_EVALUACION.md`](OPA/README_EVALUACION.md).
+Para más detalles, consulta [`OPA/README.md`](OPA/README.md).
 
 ## Vault (HashiCorp)
 
@@ -441,7 +441,7 @@ Para más detalles, consulta la [documentación completa de Vault](Vault/README.
 - **Documentación detallada del proyecto**:
   - `Terraform/README.md` - Documentación completa de la infraestructura
   - `Vault/README.md` - Documentación detallada de configuración y uso de Vault
-  - `OPA/README_EVALUACION.md` - Documentación de políticas OPA
+  - `OPA/README.md` - Documentación completa de políticas OPA
 - **Documentación oficial**:
   - Proveedores Terraform: azurerm, vault, random
   - OPA (tfplan/v2): <https://www.openpolicyagent.org/>

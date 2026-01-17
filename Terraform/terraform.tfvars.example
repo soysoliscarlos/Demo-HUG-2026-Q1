@@ -1,7 +1,3 @@
-##### 0 - Variables - Configuración general de Azure #####
-# Reemplaza con tu Subscription ID (GUID)
-subscription_id = "<YOUR_AZURE_SUBSCRIPTION_ID>"
-
 ##### Variables - Configuración de despliegue y etiquetado #####
 # environment: por ejemplo "dev", "staging" o "prod"
 environment = "dev"
@@ -15,15 +11,42 @@ resource_group_name = "rg-rag-dev"
 # Región/ubicación, por ejemplo "eastus2"
 location            = "eastus2"
 
+##### Variables - Virtual Network (VNet) #####
+# Nombre de la Virtual Network
+vnet_name          = "vnet-rag-dev"
+# Espacio de direcciones de la VNet (CIDR)
+vnet_address_space = ["10.0.0.0/16"]
+
+# Configuración de subnets
+# IMPORTANTE: Requiere una subnet llamada "subnet_bastion" con nombre "AzureBastionSubnet" y tamaño mínimo /26
+subnets = {
+  subnet_bastion = {
+    name             = "AzureBastionSubnet" # Nombre requerido por Azure Bastion
+    address_prefixes = ["10.0.0.0/26"]     # Mínimo /26 (64 direcciones) para Azure Bastion
+  }
+  subnet_vm = {
+    name             = "subnet-vm"
+    address_prefixes = ["10.0.1.0/24"]
+  }
+  subnet_private_endpoints = {
+    name              = "subnet-private-endpoints"
+    address_prefixes  = ["10.0.2.0/24"]
+    service_endpoints = [] # Opcional: ["Microsoft.Storage", "Microsoft.KeyVault"]
+  }
+}
+
 ##### Variables - Storage Account RAC #####
-# Nombre de la storage account (solo letras/números, min/max según Azure)
-storage_account_name  = "<yourstorageacct>"
-# Nombre del contenedor
-container_name        = "<your-container>"
-# Tipo de acceso: "private" | "blob" | "container" según necesidades
-container_access_type = "private"
+# Nombre de la storage account (solo letras minúsculas y números, 3-24 caracteres, único globalmente)
+storage_account_name = "ragstorageaccount"
 
 ##### Variables - Key Vault del RAC #####
-key_vault_name = "<your-key-vault-name>"
+# Nombre del Key Vault (solo letras, números y guiones, único globalmente)
+key_vault_name = "rag-key-vault"
+# SKU: "standard" o "premium"
 key_vault_sku  = "standard"
+
+##### Variables - Virtual Machine #####
+# Object ID del grupo de Azure AD que tendrá acceso a la VM mediante Azure AD login
+# Para obtener el Object ID: az ad group show --group "<NOMBRE_GRUPO>" --query id -o tsv
+vm_azure_ad_group_object_id = "<YOUR_AZURE_AD_GROUP_OBJECT_ID>"
 

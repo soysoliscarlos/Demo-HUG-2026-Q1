@@ -730,52 +730,64 @@ vault version
 3. **Editar `terraform.tfvars` con tus valores:**
    ```hcl
    ##### Variables - Configuración de despliegue y etiquetado #####
+   # environment: por ejemplo "dev", "staging" o "prod"
    environment = "dev"
    tags = {
      owner = "tu-equipo"
    }
    
-   ##### Variables - Resource Group #####
+   ##### Variables - Resource Group RAC #####
+   # Nombre del resource group
    resource_group_name = "rg-rag-dev"
+   # Región/ubicación, por ejemplo "eastus2"
    location            = "eastus2"
    
-   ##### Variables - Virtual Network #####
+   ##### Variables - Virtual Network (VNet) #####
+   # Nombre de la Virtual Network
    vnet_name          = "vnet-rag-dev"
+   # Espacio de direcciones de la VNet (CIDR)
    vnet_address_space = ["10.0.0.0/16"]
    
+   # Configuración de subnets
+   # IMPORTANTE: Requiere una subnet llamada "subnet_bastion" con nombre "AzureBastionSubnet" y tamaño mínimo /26
    subnets = {
      subnet_bastion = {
-       name              = "AzureBastionSubnet"  # Nombre requerido para Azure Bastion
-       address_prefixes  = ["10.0.0.0/26"]      # Mínimo /26 para Azure Bastion
-       service_endpoints = []
+       name             = "AzureBastionSubnet" # Nombre requerido por Azure Bastion
+       address_prefixes = ["10.0.0.0/26"]     # Mínimo /26 (64 direcciones) para Azure Bastion
      }
      subnet_vm = {
-       name              = "subnet-vm"
-       address_prefixes  = ["10.0.1.0/24"]
-       service_endpoints = []
+       name             = "subnet-vm"
+       address_prefixes = ["10.0.1.0/24"]
      }
      subnet_private_endpoints = {
        name              = "subnet-private-endpoints"
-       address_prefixes  = ["10.0.4.0/24"]
-       service_endpoints = []
+       address_prefixes  = ["10.0.2.0/24"]
+       service_endpoints = [] # Opcional: ["Microsoft.Storage", "Microsoft.KeyVault"]
      }
    }
    
-   ##### Variables - Storage Account #####
-   storage_account_name  = "ragstorageaccount"  # Solo minúsculas y números, 3-24 caracteres
+   ##### Variables - Storage Account RAC #####
+   # Nombre de la storage account (solo letras minúsculas y números, 3-24 caracteres, único globalmente)
+   storage_account_name = "ragstorageaccount"
    
-   ##### Variables - Key Vault #####
-   key_vault_name = "rag-key-vault"  # Solo letras, números y guiones
+   ##### Variables - Key Vault del RAC #####
+   # Nombre del Key Vault (solo letras, números y guiones, único globalmente)
+   key_vault_name = "rag-key-vault"
+   # SKU: "standard" o "premium"
    key_vault_sku  = "standard"
    
    ##### Variables - Virtual Machine #####
-   vm_azure_ad_group_object_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # Object ID del grupo de Azure AD
+   # Object ID del grupo de Azure AD que tendrá acceso a la VM mediante Azure AD login
+   # Para obtener el Object ID: az ad group show --group "<NOMBRE_GRUPO>" --query id -o tsv
+   vm_azure_ad_group_object_id = "<YOUR_AZURE_AD_GROUP_OBJECT_ID>"
    ```
 
    **Notas importantes:**
-   - `storage_account_name`: Debe ser único globalmente, solo minúsculas y números, entre 3-24 caracteres
+   - `storage_account_name`: Debe ser único globalmente, solo letras minúsculas y números, entre 3-24 caracteres
    - `key_vault_name`: Solo letras, números y guiones, debe ser único globalmente
-   - `vnet_address_space`: Espacio de direcciones para la VNet
+   - `vnet_address_space`: Espacio de direcciones para la VNet (CIDR)
+   - `subnet_bastion`: Debe tener el nombre exacto `AzureBastionSubnet` y tamaño mínimo `/26` (64 direcciones)
+   - `vm_azure_ad_group_object_id`: Object ID del grupo de Azure AD. Obtener con: `az ad group show --group "<NOMBRE_GRUPO>" --query id -o tsv`
 
 ### Paso 9: Configurar Grupo de Azure AD para VM (Requerido)
 
@@ -1074,9 +1086,10 @@ subnets = {
    - Resolución DNS privada mediante Private DNS Zones
 
 3. **Network Security:**
-   - NSGs asociados a cada subnet
-   - Service Endpoints configurados para servicios críticos
-   - VNet Peering con configuración de seguridad
+   - NSGs asociados a cada subnet (excepto subnet_bastion)
+   - Service Endpoints configurados opcionalmente para servicios críticos
+   - Azure Bastion para acceso seguro a VMs sin exponer puertos públicamente
+   - Regla NSG especial que permite RDP desde Bastion a la VM
 
 4. **RBAC:**
    - Key Vault con RBAC habilitado
@@ -1171,9 +1184,8 @@ key_vault_name = "nuevo-key-vault-nombre-123"
 # 1. Verificar que la subnet de Bastion está configurada correctamente en terraform.tfvars:
 subnets = {
   subnet_bastion = {
-    name              = "AzureBastionSubnet"  # Nombre exacto requerido
-    address_prefixes  = ["10.0.0.0/26"]      # Mínimo /26 (64 direcciones)
-    service_endpoints = []
+    name             = "AzureBastionSubnet" # Nombre exacto requerido
+    address_prefixes = ["10.0.0.0/26"]     # Mínimo /26 (64 direcciones)
   }
   # ... otras subnets
 }
@@ -1283,6 +1295,54 @@ terraform init -upgrade
 ```bash
 # Si cambiaste el backend, necesitas migrar el estado:
 terraform init -migrate-state
+```
+
+### Error: "Azure Bastion subnet name must be AzureBastionSubnet"
+
+**Causa:** La subnet de Bastion no tiene el nombre exacto requerido por Azure.
+
+**Solución:**
+```bash
+# Verifica que en terraform.tfvars tengas:
+subnets = {
+  subnet_bastion = {
+    name              = "AzureBastionSubnet"  # Nombre EXACTO requerido
+    address_prefixes  = ["10.0.5.0/26"]      # Mínimo /26
+  }
+  # ... otras subnets
+}
+```
+
+### Error: "Cannot access VM via Azure Bastion"
+
+**Causa:** Varias posibles causas: grupo de Azure AD no configurado, extensión no instalada, o permisos incorrectos.
+
+**Solución:**
+```bash
+# 1. Verificar que el grupo de Azure AD existe y tiene miembros:
+az ad group show --group "<NOMBRE_GRUPO>" --query id -o tsv
+
+# 2. Verificar que el Object ID en terraform.tfvars es correcto:
+vm_azure_ad_group_object_id = "<OBJECT_ID_DEL_GRUPO>"
+
+# 3. Verificar que la extensión AADLoginForWindows está instalada:
+az vm extension list --vm-name <VM_NAME> --resource-group <RG_NAME>
+
+# 4. Verificar role assignments:
+az role assignment list --scope /subscriptions/<SUB_ID>/resourceGroups/<RG>/providers/Microsoft.Compute/virtualMachines/<VM_NAME>
+```
+
+### Error: "VM User Login role assignment failed"
+
+**Causa:** El Service Principal no tiene permisos de User Access Administrator.
+
+**Solución:**
+```bash
+# Asignar rol User Access Administrator al Service Principal:
+az role assignment create \
+  --assignee <APP_ID> \
+  --role "User Access Administrator" \
+  --scope "/subscriptions/<SUBSCRIPTION_ID>"
 ```
 
 ### Problemas Comunes con Vault en Modo Desarrollo

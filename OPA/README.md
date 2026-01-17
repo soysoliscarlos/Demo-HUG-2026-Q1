@@ -56,12 +56,17 @@ OPA valida que ningún recurso de Azure tenga acceso público habilitado:
 
 **Política**: `deny_public_internet.rego`  
 **Valida**:
-- Storage Accounts sin acceso público
+- Storage Accounts sin acceso público (blob access y network access)
 - Key Vaults sin acceso público
-- Network Security Groups sin reglas abiertas a Internet
-- Cualquier recurso con flags de acceso público
+- Network Security Groups sin reglas de salida abiertas a Internet
+- Cualquier recurso genérico con flags de acceso público (catch-all)
 
-**Resultado**: Si hay violaciones, OPA las lista antes de aplicar cambios con Terraform.
+**Estructura**:
+- **8 reglas deny**: Cada una valida un tipo específico de recurso o configuración
+- **1 regla violations**: Para uso en CI/CD con `--fail-defined`
+- **5 funciones helper**: Simplifican la lógica y permiten reutilización de código
+
+**Resultado**: Si hay violaciones, OPA las lista antes de aplicar cambios con Terraform. El script `evaluar_politica.ps1` automatiza la evaluación con validaciones y formato de salida coloreado.
 
 ## 📋 Tabla de Contenidos
 
@@ -460,101 +465,117 @@ Este archivo contiene una política de OPA escrita en Rego que valida que ningú
 
 #### Estructura del Archivo
 
-**Encabezado y Documentación (líneas 1-13)**
+**Encabezado y Documentación (líneas 1-21)**
 - Comentarios descriptivos que explican el propósito de la política
 - Lista de recursos validados: Storage Account, Key Vault, Network Security Groups, y recursos genéricos
+- Resumen de reglas y funciones helper incluidas
 
-**Paquete y Configuración (líneas 18-22)**
+**Paquete y Configuración (líneas 23-30)**
 ```rego
 package terraform.deny_public_internet
 import rego.v1
 ```
 - Define el paquete de la política con el namespace `terraform.deny_public_internet`
 - Importa la sintaxis moderna de Rego (`rego.v1`) para usar sintaxis más clara y moderna
+- El namespace se usa para acceder a las reglas desde OPA CLI: `data.terraform.deny_public_internet.deny`
 
 **Reglas de Denegación por Tipo de Recurso**
 
-La política contiene 8 reglas `deny` que se evalúan independientemente. Cada regla verifica un tipo específico de recurso o condición:
+La política contiene **8 reglas `deny`** que se evalúan independientemente. Cada regla verifica un tipo específico de recurso o condición:
 
-1. **REGLA 1: Azure Storage Account - Blob Public Access (líneas 39-67)**
+1. **REGLA 1: Azure Storage Account - Blob Public Access (líneas 48-83)**
    - Verifica que `allow_blob_public_access` no sea `true`
+   - Esta es una configuración de seguridad crítica que puede exponer datos sensibles públicamente
    - Mensaje: `"Storage account {name} has allow_blob_public_access = true"`
 
-2. **REGLA 2: Azure Storage Account - Public Network Access (String) (líneas 78-105)**
+2. **REGLA 2: Azure Storage Account - Public Network Access (String) (líneas 85-121)**
    - Verifica que `public_network_access` (string) sea `"Disabled"` o vacío
    - Convierte a minúsculas para comparación case-insensitive
+   - Maneja variaciones como "Enabled", "ENABLED", "enabled", etc.
    - Mensaje: `"Storage account {name} has public_network_access = {value}"`
 
-3. **REGLA 3: Azure Storage Account - Public Network Access (Boolean) (líneas 114-134)**
+3. **REGLA 3: Azure Storage Account - Public Network Access (Boolean) (líneas 123-150)**
    - Verifica que `public_network_access_enabled` (boolean) sea `false`
-   - Usa función helper `is_boolean()` para validar el tipo
+   - Usa función helper `is_boolean()` para validar el tipo y evitar falsos positivos
    - Mensaje: `"Storage account {name} has public_network_access_enabled = true (debe ser false)"`
 
-4. **REGLA 4: Azure Key Vault - Public Network Access (String) (líneas 143-164)**
+4. **REGLA 4: Azure Key Vault - Public Network Access (String) (líneas 152-180)**
    - Verifica que `public_network_access` (string) sea `"Disabled"` o vacío
+   - Los Key Vaults contienen secretos y credenciales, por lo que el acceso público es un riesgo crítico
+   - Comparación case-insensitive
    - Mensaje: `"Key Vault {name} has public network access enabled"`
 
-5. **REGLA 5: Azure Key Vault - Public Network Access (Boolean) (líneas 172-189)**
+5. **REGLA 5: Azure Key Vault - Public Network Access (Boolean) (líneas 182-205)**
    - Verifica que `public_network_access_enabled` (boolean) sea `false`
+   - Usa función helper `is_boolean()` para validar el tipo
    - Mensaje: `"Key Vault {name} has public_network_access_enabled = true (debe ser false)"`
 
-6. **REGLA 6: Catch-all para Recursos Genéricos - Public Network Access (String) (líneas 202-231)**
-   - Verifica cualquier recurso con `public_network_access` (string) que no sea `"Disabled"`
-   - Excluye tipos específicos que ya tienen reglas dedicadas para evitar duplicados
-   - Excluye: `azurerm_storage_account`, `azurerm_key_vault`, `azurerm_ai_services`, `azurerm_ai_foundry`, `azurerm_ai_foundry_project`
+6. **REGLA 6: Catch-all para Recursos Genéricos - Public Network Access (String) (líneas 207-250)**
+   - Verifica cualquier recurso con `public_network_access` (string) que no sea `"Disabled"` o null
+   - Excluye tipos específicos que ya tienen reglas dedicadas para evitar mensajes duplicados
+   - Excluye: `azurerm_storage_account`, `azurerm_key_vault`
    - Mensaje: `"Resource {name} ({type}) has public_network_access = {value}"`
 
-7. **REGLA 7: Catch-all para Recursos Genéricos - Public Network Access (Boolean) (líneas 240-258)**
+7. **REGLA 7: Catch-all para Recursos Genéricos - Public Network Access (Boolean) (líneas 252-282)**
    - Verifica cualquier recurso con `public_network_access_enabled = true`
+   - Usa función helper `is_boolean()` para validar el tipo antes de comparar
    - Excluye tipos específicos que ya tienen reglas dedicadas
-   - Excluye: `azurerm_storage_account`, `azurerm_key_vault`, `azurerm_ai_services`, `azurerm_ai_foundry`, `azurerm_ai_foundry_project`
-   - Mensaje: `"Resource {name} ({type}) has public_network_access_enabled = true"`
+   - Excluye: `azurerm_storage_account`, `azurerm_key_vault`
+   - Mensaje: `"Resource {name} ({type}) has public_network_access_enabled = true (debe ser false)"`
 
-8. **REGLA 8: Network Security Group - Reglas de Salida a Internet (líneas 273-312)**
-   - Verifica reglas de salida (outbound) que permiten tráfico a Internet
-   - Usa funciones helper `get_destination()` e `is_open_internet()` para identificar destinos públicos
-   - Detecta destinos: `"*"`, `"Internet"`, `"0.0.0.0/0"` (case-insensitive)
+8. **REGLA 8: Network Security Group - Reglas de Salida a Internet (líneas 284-336)**
+   - Verifica reglas de salida (outbound) con `direction = "Outbound"` y `access = "Allow"`
+   - Usa funciones helper `arrayify()`, `get_destination()` e `is_open_internet()` para identificar destinos públicos
+   - Detecta destinos: `"*"` (wildcard), `"Internet"` (tag de Azure), `"0.0.0.0/0"` (toda la red IPv4)
+   - Comparación case-insensitive
    - Mensaje: `"Network Security Group {name} has an outbound rule '{rule_name}' allowing traffic to {destination}"`
 
-#### Funciones Helper (líneas 314-528)
+#### Funciones Helper (líneas 338-510)
 
-**`get_first(list)` (líneas 332-349)**
-- Extrae el primer elemento de una lista o retorna un objeto vacío si la lista es null o vacía
-- Útil para acceder a elementos de arrays que pueden estar vacíos
-- Maneja tres casos: lista con elementos, lista null, lista vacía
+La política incluye **5 funciones helper** que simplifican la lógica de las reglas y permiten reutilizar código común:
 
-**`is_array(val)` (líneas 361-366)**
+**`is_array(val)` (líneas 349-366)**
 - Verifica si un valor es un array usando pattern matching de Rego
-- Intenta acceder a un índice arbitrario; si es válido, el valor es un array
+- Intenta acceder a un índice arbitrario; si el acceso es válido, el valor es un array
+- Uso: Utilizada por la función `arrayify()` para verificar el tipo de dato
+- Ejemplo: `is_array([1, 2, 3])` retorna `true`, `is_array("string")` retorna `false`
 
-**`arrayify(val)` (líneas 382-393)**
-- Convierte un valor a lista; si ya es una lista, la retorna tal cual
-- Si no es una lista, retorna una lista vacía
-- Útil para normalizar valores que pueden ser arrays o null
+**`arrayify(val)` (líneas 368-395)**
+- Convierte un valor a lista. Si ya es una lista, la retorna tal cual
+- Si no es una lista (null, objeto, string, etc.), retorna una lista vacía
+- Útil para normalizar valores que pueden ser arrays o null, permitiendo iterar sobre ellos de forma segura
+- Uso: Utilizada en REGLA 8 para normalizar `security_rule` en Network Security Groups
+- Ejemplo: `arrayify([1, 2])` retorna `[1, 2]`, `arrayify(null)` retorna `[]`
 
-**`get_destination(rule)` (líneas 412-440)**
+**`get_destination(rule)` (líneas 397-444)**
 - Determina el prefijo de dirección de destino para una regla de NSG
-- Prioriza `destination_address_prefixes` (array) sobre `destination_address_prefix` (string)
-- Retorna el primer elemento del array si existe, o el string si el array está vacío/null
-- Maneja tres casos: array con elementos, array null, array vacío
+- Las reglas de NSG pueden tener el destino en dos formatos:
+  1. `destination_address_prefixes` (array de prefijos) - tiene prioridad
+  2. `destination_address_prefix` (string con un solo prefijo) - fallback
+- Prioriza el array si existe y tiene elementos, y hace fallback al string si el array está vacío o es null
+- **IMPORTANTE**: Si una regla tiene múltiples prefijos en el array, esta función solo retorna el primer elemento
+- Uso: Utilizada en REGLA 8 para obtener el destino de las reglas de NSG
+- Ejemplo: Si `rule` tiene `destination_address_prefixes = ["0.0.0.0/0", "10.0.0.0/8"]`, retorna `"0.0.0.0/0"` (primer elemento)
 
-**`is_open_internet(prefix)` (líneas 455-474)**
+**`is_open_internet(prefix)` (líneas 446-481)**
 - Verifica si un prefijo de dirección representa acceso abierto a Internet
-- Considera válidos: `"*"`, `"internet"`, `"0.0.0.0/0"` (case-insensitive)
-- Usa `lower()` para normalizar la comparación
-- Maneja tres casos específicos para cada tipo de prefijo
+- Considera válidos los siguientes valores (case-insensitive):
+  - `"*"` (cualquier destino - wildcard)
+  - `"internet"` (tag de Azure que representa Internet)
+  - `"0.0.0.0/0"` (notación CIDR que representa toda la red IPv4)
+- Usa `lower()` para normalizar la comparación y hacerla case-insensitive
+- Uso: Utilizada en REGLA 8 para identificar si una regla de NSG permite tráfico a Internet abierto
+- Ejemplo: `is_open_internet("Internet")` retorna `true`, `is_open_internet("10.0.0.0/8")` no se define (retorna `false` implícitamente)
 
-**`exists_deny_outbound(rules)` (líneas 486-502)**
-- Verifica si existe al menos una regla de salida que deniega tráfico a Internet
-- Actualmente no se usa en las reglas activas, pero disponible para futuras validaciones
-- Podría usarse para validar que existe una regla de denegación explícita
-
-**`is_boolean(x)` (líneas 520-527)**
+**`is_boolean(x)` (líneas 483-510)**
 - Verifica si un valor es de tipo booleano
-- Retorna true si el valor es `true` o `false`
-- No se define (retorna false implícitamente) si el valor es null, string, number, etc.
+- Retorna `true` si el valor es `true` o `false`
+- No se define (retorna `false` implícitamente) si el valor es null, string, number, etc.
+- Esta función es útil para validar tipos antes de hacer comparaciones, evitando falsos positivos cuando un campo puede tener diferentes tipos
+- Uso: Utilizada en REGLA 3 (Storage Account) y REGLA 5 (Key Vault) para validar que `public_network_access_enabled` es realmente un boolean antes de compararlo con `true`
+- Ejemplo: `is_boolean(true)` retorna `true`, `is_boolean("true")` no se define (retorna `false` implícitamente)
 
-#### Regla de Violaciones (líneas 545-549)
+#### Regla de Violaciones (líneas 512-536)
 
 ```rego
 violations if {
@@ -562,11 +583,18 @@ violations if {
 }
 ```
 
-- Esta regla booleana se define solo cuando hay violaciones (cuando el conjunto `deny` tiene elementos)
-- Útil para usar con `--fail-defined` en OPA CLI para que el comando salga con código de error no-cero si existen violaciones
-- Ejemplo de uso: `opa eval --fail-defined "data.terraform.deny_public_internet.violations"`
-- Si hay violaciones, `violations` se define y el comando falla
-- Si no hay violaciones, `violations` no se define y el comando tiene éxito
+- Esta regla booleana se define **SOLO** cuando hay violaciones (cuando el conjunto `deny` tiene elementos)
+- Útil para usar con `--fail-defined` en OPA CLI, lo que hace que el comando salga con código de error no-cero si existen violaciones
+- **NOTA**: Esta regla no se evalúa directamente por `evaluar_politica.ps1`, pero está disponible para uso en pipelines de CI/CD que requieren fallar automáticamente cuando hay violaciones
+- **Comportamiento**:
+  - Si hay violaciones: `violations` se define (retorna `true`) y el comando falla
+  - Si no hay violaciones: `violations` no se define (retorna `false` implícitamente) y el comando tiene éxito
+- **Uso en CI/CD**:
+  ```powershell
+  opa eval --input ../Terraform/tfplan.json \
+           --data deny_public_internet.rego \
+           --fail-defined "data.terraform.deny_public_internet.violations"
+  ```
 
 ---
 
@@ -593,57 +621,75 @@ param(
 
 #### Flujo de Ejecución
 
-**1. Encabezado y Presentación (líneas 10-14)**
-- Muestra un encabezado formateado con colores
-- Indica el nombre de la política que se está evaluando
+El script realiza las siguientes acciones en orden:
 
-**2. Verificación de OPA (líneas 16-24)**
+**1. Encabezado y Presentación (líneas 44-50)**
+- Muestra un encabezado visual formateado con colores cyan
+- Indica el nombre de la política que se está evaluando: "Deny Public Internet Access"
+
+**2. Verificación de OPA CLI Instalado (líneas 52-75)**
 ```powershell
 $opaVersion = opa version 2>&1
 ```
-- Intenta ejecutar `opa version` para verificar que OPA está instalado
-- Captura tanto stdout como stderr (`2>&1`)
-- Si falla, muestra mensaje de error con enlace de descarga y sale con código 1
+- Intenta ejecutar `opa version` para verificar que OPA está instalado y disponible en el PATH
+- Captura tanto stdout como stderr (`2>&1`) para capturar todos los mensajes
+- Si el comando tiene éxito, muestra la versión de OPA encontrada en verde
+- Si falla (excepción o comando no encontrado), muestra error con enlace de descarga y sale con código 1
 
-**3. Validación de Archivos (líneas 26-44)**
-- Verifica que `$PlanFile` exista usando `Test-Path`
+**3. Verificación de Archivo de Plan de Terraform (líneas 77-95)**
+- Verifica que el archivo JSON del plan de Terraform exista en la ruta especificada
+- El plan debe estar en formato JSON (tfplan/v2) generado con:
+  ```powershell
+  terraform plan -out=tfplan.bin
+  terraform show -json tfplan.bin > tfplan.json
+  ```
 - Si no existe, muestra instrucciones para generarlo y sale con código 1
-- Verifica que `$PolicyFile` exista
-- Muestra mensajes de confirmación en verde para archivos encontrados
 
-**4. Ejecución de Evaluación (líneas 46-88)**
+**4. Verificación de Archivo de Política OPA (líneas 97-105)**
+- Verifica que el archivo de política OPA (formato .rego) exista
+- Si no existe, muestra error y termina con código 1
+- Si todas las verificaciones pasaron, muestra confirmación de archivos encontrados en verde
+
+**5. Ejecución de la Evaluación OPA (líneas 107-145)**
 ```powershell
 $query = "data.terraform.deny_public_internet.deny"
 $argsList = @('eval', '--input', $PlanFile, '--data', $PolicyFile, '--format', 'pretty', $query)
 $output = & opa @argsList 2>&1
 ```
+- Define la consulta Rego que accede al conjunto `deny` en el namespace de la política
+- Construye la lista de argumentos para OPA CLI usando splatting (`@argsList`)
+- Ejecuta OPA con formato legible (`--format pretty`) capturando toda la salida
+- Captura el código de salida del comando OPA usando `$LASTEXITCODE`
 
-- Construye la consulta OPA: `data.terraform.deny_public_internet.deny`
-- Prepara argumentos para OPA CLI con formato legible (`--format pretty`)
-- Ejecuta OPA capturando toda la salida
-
-**5. Procesamiento de Resultados (líneas 57-88)**
+**6. Procesamiento de Resultados (líneas 147-213)**
 
 **Si no hay violaciones:**
-- Detecta patrones `[]` o `undefined` en la salida
-- Muestra mensaje de éxito en verde
-- Sale con código 0
+- Detecta patrones `[]` (array vacío) o `undefined` en la salida usando regex
+- Muestra mensaje de éxito en verde: "✓ Política cumplida: No se encontraron violaciones"
+- Sale con código 0 (éxito)
 
 **Si hay violaciones:**
-- Muestra encabezado de violaciones en rojo
+- Muestra encabezado de violaciones en rojo: "✗ Violaciones encontradas:"
 - Extrae mensajes de violación usando expresiones regulares:
   ```powershell
   $violations = $output | Select-String -Pattern '"(.*)"' | ForEach-Object {
       $_.Matches.Groups[1].Value
   }
   ```
-- Muestra cada violación como una lista con viñetas en rojo
-- Si `$FailOnViolation` está activado, sale con código 1; de lo contrario, muestra advertencia y sale con código 0
+- Muestra cada violación como una lista con viñetas (•) en rojo
+- Si no se pudieron extraer violaciones (formato inesperado), muestra la salida completa de OPA para depuración
+- **Manejo de código de salida según configuración:**
+  - Si `$FailOnViolation` está habilitado: termina con error (exit 1) - útil para CI/CD
+  - Si no está habilitado: muestra advertencia en amarillo y continúa (exit 0) - útil para ejecución manual
 
-**6. Manejo de Errores (líneas 89-92)**
-- Captura excepciones durante la ejecución de OPA
-- Muestra mensaje de error en rojo
-- Sale con código 1
+**7. Manejo de Errores (líneas 214-224)**
+- Captura cualquier excepción que ocurra durante la ejecución de OPA
+- Esto puede incluir:
+  - Errores de sintaxis en la política
+  - Problemas al leer los archivos
+  - Errores internos de OPA
+  - Problemas de formato en el plan de Terraform
+- Muestra mensaje de error en rojo y sale con código 1
 
 #### Códigos de Salida
 
@@ -734,14 +780,13 @@ La política `deny_public_internet.rego` valida los siguientes recursos y config
 - La validación es case-insensitive y maneja tanto `destination_address_prefix` (string) como `destination_address_prefixes` (array)
 
 ### ✅ Recursos Genéricos (Catch-all)
-- **REGLA 6**: Cualquier recurso con `public_network_access` (string) != `"Disabled"` será rechazado
+- **REGLA 6**: Cualquier recurso con `public_network_access` (string) != `"Disabled"` y != null será rechazado
+  - Verifica explícitamente que el campo no sea null antes de evaluar
+  - Comparación case-insensitive
+  - Excluye tipos específicos que ya tienen reglas dedicadas: `azurerm_storage_account`, `azurerm_key_vault`
 - **REGLA 7**: Cualquier recurso con `public_network_access_enabled = true` será rechazado
-- Excluye tipos específicos que ya tienen reglas dedicadas para evitar mensajes duplicados:
-  - `azurerm_storage_account`
-  - `azurerm_key_vault`
-  - `azurerm_ai_services`
-  - `azurerm_ai_foundry`
-  - `azurerm_ai_foundry_project`
+  - Usa función helper `is_boolean()` para validar el tipo antes de comparar
+  - Excluye tipos específicos que ya tienen reglas dedicadas: `azurerm_storage_account`, `azurerm_key_vault`
 
 ---
 

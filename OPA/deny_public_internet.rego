@@ -218,8 +218,6 @@ deny contains msg if {
 # Tipos excluidos (tienen reglas específicas):
 # - azurerm_storage_account (REGLA 2)
 # - azurerm_key_vault (REGLA 4)
-# - azurerm_ai_services, azurerm_ai_foundry, azurerm_ai_foundry_project
-#   (excluidos para evitar duplicados, aunque no tienen reglas específicas activas)
 # ------------------------------------------------------------------------------
 deny contains msg if {
     some i
@@ -230,13 +228,10 @@ deny contains msg if {
     # Esto evita generar mensajes duplicados para el mismo recurso
     rc.type != "azurerm_storage_account"
     rc.type != "azurerm_key_vault"
-    rc.type != "azurerm_ai_services"
-    rc.type != "azurerm_ai_foundry"
-    rc.type != "azurerm_ai_foundry_project"
     
-    # Verificar que el campo `public_network_access` existe
-    # Si no existe, no se considera violación
-    after.public_network_access
+    # Verificar que el campo `public_network_access` existe y no es null
+    # Si no existe o es null, no se considera violación
+    after.public_network_access != null
     
     # Convertir a minúsculas para comparación case-insensitive
     pn_str := lower(after.public_network_access)
@@ -260,13 +255,12 @@ deny contains msg if {
 # propiedad configurada como `true`.
 #
 # IMPORTANTE: Excluimos tipos de recursos que ya tienen reglas específicas para
-# evitar mensajes duplicados.
+# evitar mensajes duplicados. Si un recurso tiene una regla específica, esa regla
+# se encarga de generar el mensaje con más contexto.
 #
 # Tipos excluidos (tienen reglas específicas):
 # - azurerm_storage_account (REGLA 3)
 # - azurerm_key_vault (REGLA 5)
-# - azurerm_ai_services, azurerm_ai_foundry, azurerm_ai_foundry_project
-#   (excluidos para evitar duplicados, aunque no tienen reglas específicas activas)
 # ------------------------------------------------------------------------------
 deny contains msg if {
     some i
@@ -276,16 +270,20 @@ deny contains msg if {
     # Excluir tipos de recursos con reglas específicas
     rc.type != "azurerm_storage_account"
     rc.type != "azurerm_key_vault"
-    rc.type != "azurerm_ai_services"
-    rc.type != "azurerm_ai_foundry"
-    rc.type != "azurerm_ai_foundry_project"
     
-    # Verificar que `public_network_access_enabled` está configurado como `true`
+    # Obtener el valor de `public_network_access_enabled`
+    pn_bool := after.public_network_access_enabled
+    
+    # Verificar que es realmente un boolean (no null u otro tipo)
+    is_boolean(pn_bool)
+    
+    # Verificar que el valor es `true` (acceso público habilitado)
     # Si es `false` o no existe, no hay violación
-    after.public_network_access_enabled == true
+    pn_bool == true
 
-    # Generar mensaje genérico
-    msg := sprintf("Resource %s (%s) has public_network_access_enabled = true", [rc.name, rc.type])
+    # Generar mensaje genérico que incluye el tipo de recurso
+    # Esto ayuda a identificar qué tipo de recurso tiene el problema
+    msg := sprintf("Resource %s (%s) has public_network_access_enabled = true (debe ser false)", [rc.name, rc.type])
 }
 
 # ------------------------------------------------------------------------------
@@ -406,11 +404,16 @@ arrayify(val) := [] if {
 # ------------------------------------------------------------------------------
 # Determina el prefijo de dirección de destino para una regla de NSG.
 # Las reglas de NSG pueden tener el destino en dos formatos:
-# 1. `destination_address_prefixes` (array de prefijos)
-# 2. `destination_address_prefix` (string con un solo prefijo)
+# 1. `destination_address_prefixes` (array de prefijos) - tiene prioridad
+# 2. `destination_address_prefix` (string con un solo prefijo) - fallback
 #
 # Esta función prioriza el array si existe y tiene elementos, y hace
 # fallback al string si el array está vacío o es null.
+#
+# IMPORTANTE: Si una regla tiene múltiples prefijos en el array, esta función
+# solo retorna el primer elemento. La REGLA 8 evalúa cada regla individualmente,
+# por lo que si hay múltiples prefijos problemáticos, cada uno debería generar
+# su propia violación (esto requeriría modificar la lógica de la regla).
 #
 # Uso: Utilizada en REGLA 8 para obtener el destino de las reglas de NSG.
 #
@@ -418,6 +421,7 @@ arrayify(val) := [] if {
 #          retorna "0.0.0.0/0" (primer elemento)
 #          Si solo tiene destination_address_prefix = "Internet",
 #          retorna "Internet"
+#          Si ambos son null, la función no se define (causa fallo en la regla)
 # ------------------------------------------------------------------------------
 # Caso 1: El array existe y tiene elementos (prioridad)
 get_destination(rule) := dest if {
@@ -426,6 +430,7 @@ get_destination(rule) := dest if {
     # Verificar que el array tiene al menos un elemento
     count(rule.destination_address_prefixes) > 0
     # Retornar el primer elemento del array
+    # NOTA: Si hay múltiples prefijos, solo se evalúa el primero
     dest := rule.destination_address_prefixes[0]
 }
 
@@ -464,6 +469,10 @@ get_destination(rule) := dest if {
 #
 # Uso: Utilizada en REGLA 8 para identificar si una regla de NSG permite
 #      tráfico a Internet abierto.
+#
+# Ejemplo: is_open_internet("Internet") retorna true
+#          is_open_internet("0.0.0.0/0") retorna true
+#          is_open_internet("10.0.0.0/8") no se define (retorna false implícitamente)
 # ------------------------------------------------------------------------------
 # Caso 1: El prefijo es "*" (wildcard - cualquier destino)
 is_open_internet(prefix) if {
@@ -528,13 +537,21 @@ is_boolean(x) if {
 # está disponible para uso en pipelines de CI/CD que requieren fallar
 # automáticamente cuando hay violaciones.
 #
+# Comportamiento:
+# - Si hay violaciones: `violations` se define (retorna true) y el comando falla
+# - Si no hay violaciones: `violations` no se define (retorna false implícitamente)
+#                          y el comando tiene éxito
+#
 # Uso en CI/CD:
 #   opa eval --input ../Terraform/tfplan.json \
 #            --data deny_public_internet.rego \
 #            --fail-defined "data.terraform.deny_public_internet.violations"
 #
-# Si hay violaciones, `violations` se define y el comando falla.
-# Si no hay violaciones, `violations` no se define y el comando tiene éxito.
+# Alternativa (sin --fail-defined):
+#   opa eval --input ../Terraform/tfplan.json \
+#            --data deny_public_internet.rego \
+#            "data.terraform.deny_public_internet.violations"
+#   # Luego verificar el resultado en el script
 # ==============================================================================
 violations if {
     # Contar cuántos elementos hay en el conjunto `deny`
