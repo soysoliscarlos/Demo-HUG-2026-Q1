@@ -1,0 +1,45 @@
+# ============================================================================
+# HashiCorp Vault - Archivo de Configuración de Ejemplo
+# ============================================================================
+# Este archivo es una plantilla para configuración de Vault en desarrollo local.
+# Para usar: copia este archivo a vault.hcl y ajusta las rutas según tu entorno.
+#
+# IMPORTANTE: Esta configuración es SOLO para desarrollo local.
+# En producción, configura TLS, auto-unseal, y backend remoto.
+# ============================================================================
+
+# Backend de almacenamiento: sistema de archivos local
+# En Windows, puedes usar barras normales (/) o escapar las barras invertidas (\\)
+# Ejemplo: path = "C:/Vault" o path = "C:\\Vault"
+# Asegúrate de que el directorio exista o que Vault tenga permisos para crearlo
+storage "file" {
+  path = "C:\\Vault"  # Ajusta esta ruta según tu entorno
+}
+
+# Configuración del listener de red
+# address: dirección IP y puerto donde Vault escuchará conexiones
+#   - "0.0.0.0:8200" escucha en todas las interfaces (desarrollo)
+#   - "127.0.0.1:8200" solo escucha en localhost (más seguro)
+# tls_disable: deshabilita TLS/SSL (SOLO para desarrollo)
+#   ⚠️ NUNCA uses tls_disable = 1 en producción
+listener "tcp" {
+  address     = "0.0.0.0:8200"
+  tls_disable = 1
+}
+
+# Deshabilita el bloqueo de memoria (mlock)
+# Requerido en Windows ya que Windows no soporta mlock como Linux/Unix
+# En Linux/Unix, mlock previene que la memoria se escriba al swap
+# En producción en Linux, considera usar disable_mlock = false si es posible
+disable_mlock = true
+
+# Habilita la interfaz web de Vault
+# Permite acceder a Vault a través de un navegador en http://127.0.0.1:8200/ui
+# Útil para desarrollo y administración visual
+ui = true
+
+# URL base que Vault anuncia a los clientes para conectarse
+# Debe coincidir con la dirección del listener
+# Los clientes (como Terraform) usarán esta URL para conectarse a Vault
+# En producción con TLS, usaría "https://" en lugar de "http://"
+api_addr = "http://127.0.0.1:8200"

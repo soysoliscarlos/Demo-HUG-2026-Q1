@@ -1,0 +1,29 @@
+##### 0 - Variables - Configuración general de Azure #####
+# Reemplaza con tu Subscription ID (GUID)
+subscription_id = "<YOUR_AZURE_SUBSCRIPTION_ID>"
+
+##### Variables - Configuración de despliegue y etiquetado #####
+# environment: por ejemplo "dev", "staging" o "prod"
+environment = "dev"
+tags = {
+  owner = "team-ml"
+}
+
+##### Variables - Resource Group RAC #####
+# Nombre del resource group
+resource_group_name = "rg-rag-dev"
+# Región/ubicación, por ejemplo "eastus2"
+location            = "eastus2"
+
+##### Variables - Storage Account RAC #####
+# Nombre de la storage account (solo letras/números, min/max según Azure)
+storage_account_name  = "<yourstorageacct>"
+# Nombre del contenedor
+container_name        = "<your-container>"
+# Tipo de acceso: "private" | "blob" | "container" según necesidades
+container_access_type = "private"
+
+##### Variables - Key Vault del RAC #####
+key_vault_name = "<your-key-vault-name>"
+key_vault_sku  = "standard"
+
