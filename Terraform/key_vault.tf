@@ -9,7 +9,6 @@ resource "azurerm_key_vault" "kv" {
   rbac_authorization_enabled = true
 
   # Deshabilitar acceso público
-  # public_network_access_enabled = true
   public_network_access_enabled = false
 
   tags = local.etiquetas_comunes

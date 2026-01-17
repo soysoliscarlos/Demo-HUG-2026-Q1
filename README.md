@@ -1,22 +1,161 @@
 # Demo: Infra privada de Azure + OPA + Vault
 
-Este repo contiene tres piezas integradas para montar un entorno seguro en Azure con red privada y control de seguridad:
+Este repositorio contiene una demostración completa de cómo construir una infraestructura segura en Azure usando tres herramientas modernas de DevOps: **Terraform**, **HashiCorp Vault** y **Open Policy Agent (OPA)**.
 
-- `Terraform/`: Infraestructura en Azure (VNet, subnets, NSG, Private Endpoints, DNS privado, Storage, Key Vault) con acceso privado.
-- `OPA/`: Política Rego que prohíbe exposición a Internet (public network access) y script para evaluar un plan de Terraform.
-- `Vault/`: Configuración local de HashiCorp Vault para gestionar credenciales de Azure que Terraform consume sin exponer secretos en archivos.
+## 🎯 ¿Qué aprenderás?
+
+Este proyecto te enseñará:
+
+- ✅ **Terraform**: Cómo definir infraestructura como código en Azure
+- ✅ **HashiCorp Vault**: Cómo gestionar secretos de forma segura
+- ✅ **OPA**: Cómo validar políticas de seguridad antes de aplicar cambios
+- ✅ **Azure Networking**: Private Endpoints, Private DNS Zones, VNet Peering
+- ✅ **Seguridad en la Nube**: Redes privadas, acceso restringido, validación automática
+
+## 🏗️ Componentes del Proyecto
+
+### 1. **Terraform/** - Infraestructura como Código
+Define y despliega recursos de Azure de forma declarativa:
+- Virtual Network (VNet) con subredes dedicadas
+- Network Security Groups (NSG)
+- Private Endpoints para Storage y Key Vault
+- Private DNS Zones para resolución DNS privada
+- Storage Account con acceso privado
+- Key Vault con RBAC habilitado
+- VNet Peering para conectividad híbrida
+
+📖 **[Ver documentación completa de Terraform →](Terraform/README.md)**
+
+### 2. **Vault/** - Gestión Segura de Secretos
+Almacena credenciales de Azure de forma encriptada:
+- Configuración local de HashiCorp Vault
+- Almacenamiento de Service Principal de Azure
+- Integración con Terraform para autenticación automática
+- Políticas de acceso granulares
+
+📖 **[Ver documentación completa de Vault →](Vault/README.md)**
+
+### 3. **OPA/** - Validación de Políticas
+Valida que los recursos no tengan acceso público habilitado:
+- Política Rego que prohíbe exposición a Internet
+- Script PowerShell para evaluación automática
+- Integración con CI/CD para validación continua
+- Detección de configuraciones inseguras
+
+📖 **[Ver documentación completa de OPA →](OPA/README.md)**
+
+## 🚀 Inicio Rápido
+
+Si ya tienes experiencia con estas herramientas, consulta las guías rápidas en cada directorio. Si estás aprendiendo, te recomendamos seguir el orden:
+
+1. **Primero**: Lee y configura [Vault](Vault/README.md) - Necesitas almacenar credenciales
+2. **Segundo**: Revisa y despliega con [Terraform](Terraform/README.md) - Crea la infraestructura
+3. **Tercero**: Valida con [OPA](OPA/README.md) - Asegura que todo esté configurado correctamente
+
+## 📚 Para Principiantes
+
+Cada directorio contiene documentación completa diseñada para personas que están aprendiendo:
+
+- **Conceptos básicos** explicados desde cero
+- **Instalación paso a paso** para Windows, Linux y macOS
+- **Ejemplos prácticos** con explicaciones detalladas
+- **Solución de problemas** para errores comunes
+- **Recursos de aprendizaje** adicionales
+
+### Orden de Aprendizaje Recomendado
+
+Si es tu primera vez con estas herramientas, te recomendamos seguir este orden:
+
+#### 1️⃣ **Primero: HashiCorp Vault** (30-45 minutos)
+- **Por qué primero**: Necesitas almacenar las credenciales de Azure antes de usar Terraform
+- **Qué aprenderás**:
+  - Conceptos básicos de gestión de secretos
+  - Cómo instalar y configurar Vault
+  - Cómo almacenar y leer secretos
+  - Políticas de acceso y tokens
+- **📖 [Empezar con Vault →](Vault/README.md)**
+
+#### 2️⃣ **Segundo: Terraform** (1-2 horas)
+- **Por qué segundo**: Usa las credenciales de Vault para crear recursos en Azure
+- **Qué aprenderás**:
+  - Conceptos de Infrastructure as Code
+  - Sintaxis HCL (HashiCorp Configuration Language)
+  - Cómo crear recursos en Azure
+  - Variables, outputs y state management
+- **📖 [Empezar con Terraform →](Terraform/README.md)**
+
+#### 3️⃣ **Tercero: Open Policy Agent** (30-45 minutos)
+- **Por qué tercero**: Valida los planes de Terraform antes de aplicar cambios
+- **Qué aprenderás**:
+  - Conceptos de políticas como código
+  - Lenguaje Rego básico
+  - Cómo validar planes de Terraform
+  - Integración con CI/CD
+- **📖 [Empezar con OPA →](OPA/README.md)**
+
+### Tiempo Total Estimado
+
+- **Principiante completo**: 3-4 horas (incluyendo instalación y configuración)
+- **Con experiencia previa**: 1-2 horas (solo configuración del proyecto)
+- **Solo revisión**: 30 minutos (entender la arquitectura)
+
+### Prerrequisitos
+
+Antes de comenzar, asegúrate de tener:
+
+- ✅ Una cuenta de Azure con suscripción activa
+- ✅ Permisos para crear recursos (Contributor o Owner)
+- ✅ Windows, Linux o macOS con PowerShell o Bash
+- ✅ Conexión a Internet para descargar herramientas
 
 A continuación verás cómo está armado, cómo ejecutarlo en Windows (PowerShell) y cómo validar que nada quede con acceso público.
 
-## Arquitectura resumida
+## 🔄 Flujo de Trabajo Completo
 
-- Red
+Este proyecto demuestra cómo tres herramientas trabajan juntas para crear infraestructura segura:
+
+```
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│   Vault    │─────▶│  Terraform  │─────▶│    OPA      │
+│            │      │             │      │             │
+│ Almacena   │      │ Crea        │      │ Valida      │
+│ credenciales│      │ recursos    │      │ políticas   │
+└─────────────┘      └─────────────┘      └─────────────┘
+     │                     │                     │
+     │                     │                     │
+     └─────────────────────┴─────────────────────┘
+                           │
+                           ▼
+                    ┌─────────────┐
+                    │    Azure    │
+                    │ Infraestructura│
+                    └─────────────┘
+```
+
+### Paso a Paso
+
+1. **Vault** almacena las credenciales de Azure de forma segura
+2. **Terraform** lee las credenciales de Vault y genera un plan de infraestructura
+3. **OPA** valida el plan antes de aplicar cambios
+4. Si OPA aprueba, **Terraform** crea los recursos en Azure
+5. La infraestructura queda desplegada de forma segura
+
+### Beneficios de esta Integración
+
+✅ **Seguridad**: Credenciales nunca en código o archivos  
+✅ **Validación**: Políticas aplicadas antes de crear recursos  
+✅ **Automatización**: Todo el proceso es repetible y versionable  
+✅ **Auditoría**: Cada paso queda registrado y documentado
+
+## 🏗️ Arquitectura Resumida
+
+- **Red**
   - VNet principal con subnets para apps, datos y una subnet dedicada a Private Endpoints
   - Peering con una VNet existente `Vnet-Jumpbox` (RG `RG-VM-Jumpbox`)
   - NSGs por subnet
   - Private Endpoints para: Storage (Blob/File) y Key Vault
   - Private DNS Zones enlazadas a la VNet local y a la VNet remota (peering)
-- Servicios de datos y secretos
+- **Servicios de datos y secretos**
   - Storage Account (acceso público deshabilitado)
   - Key Vault (RBAC enabled, acceso público deshabilitado)
 

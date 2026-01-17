@@ -2,9 +2,71 @@
 
 Esta guía explica cómo instalar, configurar y usar Open Policy Agent (OPA) con la política `deny_public_internet.rego` para validar que los recursos de Terraform no tengan acceso público habilitado.
 
+## 🎓 ¿Qué es Open Policy Agent (OPA)?
+
+**Open Policy Agent (OPA)** es un motor de políticas de código abierto que unifica la aplicación de políticas en toda la pila tecnológica. Permite definir políticas como código y evaluarlas contra datos estructurados (como planes de Terraform, configuraciones de Kubernetes, etc.).
+
+### Conceptos Clave de OPA
+
+#### 1. **Políticas como Código**
+- Define reglas de negocio y seguridad en archivos `.rego`
+- Versiona políticas con Git
+- Evalúa políticas antes de aplicar cambios (shift-left security)
+
+#### 2. **Lenguaje Rego**
+- Lenguaje declarativo diseñado para políticas
+- Sintaxis clara y expresiva
+- Basado en lógica de primer orden
+
+#### 3. **Evaluación de Políticas**
+- OPA evalúa políticas contra datos de entrada (input)
+- En este proyecto: evalúa planes de Terraform (JSON)
+- Retorna violaciones si encuentra problemas
+
+#### 4. **Reglas Deny/Allow**
+- **Deny**: Reglas que prohíben ciertas configuraciones
+- **Allow**: Reglas que permiten configuraciones específicas
+- En este proyecto: usamos reglas `deny` para bloquear acceso público
+
+#### 5. **Input Data**
+- Datos que OPA evalúa contra las políticas
+- En este proyecto: plan de Terraform en formato JSON (`tfplan.json`)
+- OPA lee el plan y verifica cada recurso
+
+### ¿Por qué usar OPA?
+
+✅ **Prevención**: Detecta problemas antes de aplicar cambios  
+✅ **Consistencia**: Aplica las mismas políticas en todos los entornos  
+✅ **Automatización**: Integra con CI/CD para validación automática  
+✅ **Multi-plataforma**: Mismo lenguaje para Terraform, Kubernetes, APIs, etc.  
+✅ **Declarativo**: Define "qué" quieres, no "cómo" lograrlo  
+✅ **Auditoría**: Documenta qué políticas se aplican y cuándo
+
+### Flujo de Trabajo con OPA
+
+```
+1. Terraform plan → 2. Convertir a JSON → 3. OPA evalúa → 4. Aplicar o corregir
+     ↓                    ↓                    ↓                    ↓
+  Plan binario        tfplan.json         Violaciones          Cambios seguros
+```
+
+### En este Proyecto
+
+OPA valida que ningún recurso de Azure tenga acceso público habilitado:
+
+**Política**: `deny_public_internet.rego`  
+**Valida**:
+- Storage Accounts sin acceso público
+- Key Vaults sin acceso público
+- Network Security Groups sin reglas abiertas a Internet
+- Cualquier recurso con flags de acceso público
+
+**Resultado**: Si hay violaciones, OPA las lista antes de aplicar cambios con Terraform.
+
 ## 📋 Tabla de Contenidos
 
-1. [Instalación de OPA desde Cero](#instalación-de-opa-desde-cero)
+1. [¿Qué es Open Policy Agent (OPA)?](#-qué-es-open-policy-agent-opa)
+2. [Instalación de OPA desde Cero](#instalación-de-opa-desde-cero)
 2. [Configuración Inicial](#configuración-inicial)
 3. [Prerrequisitos](#prerrequisitos)
 4. [Documentación del Archivo Rego](#documentación-del-archivo-rego)
@@ -390,114 +452,109 @@ Antes de usar la política OPA, asegúrate de tener:
 
 Este archivo contiene una política de OPA escrita en Rego que valida que ningún recurso en un plan de Terraform tenga acceso público a Internet habilitado. La política analiza los cambios de recursos en el plan (formato `tfplan/v2`) y emite mensajes en el conjunto `deny` para cada violación encontrada.
 
+**Recursos validados:**
+- Azure Storage Account (blob público y acceso de red público)
+- Azure Key Vault (acceso de red público)
+- Network Security Groups (reglas de salida que permiten tráfico a Internet)
+- Recursos genéricos con flags de acceso público (catch-all)
+
 #### Estructura del Archivo
 
-**Paquete y Configuración (líneas 1-3)**
+**Encabezado y Documentación (líneas 1-13)**
+- Comentarios descriptivos que explican el propósito de la política
+- Lista de recursos validados: Storage Account, Key Vault, Network Security Groups, y recursos genéricos
+
+**Paquete y Configuración (líneas 18-22)**
 ```rego
 package terraform.deny_public_internet
 import rego.v1
 ```
 - Define el paquete de la política con el namespace `terraform.deny_public_internet`
-- Importa la sintaxis moderna de Rego (`rego.v1`)
+- Importa la sintaxis moderna de Rego (`rego.v1`) para usar sintaxis más clara y moderna
 
 **Reglas de Denegación por Tipo de Recurso**
 
-La política contiene múltiples reglas `deny` que se evalúan independientemente. Cada regla verifica un tipo específico de recurso o condición:
+La política contiene 8 reglas `deny` que se evalúan independientemente. Cada regla verifica un tipo específico de recurso o condición:
 
-1. **Azure Storage Account - Blob Public Access (líneas 14-26)**
+1. **REGLA 1: Azure Storage Account - Blob Public Access (líneas 39-67)**
    - Verifica que `allow_blob_public_access` no sea `true`
    - Mensaje: `"Storage account {name} has allow_blob_public_access = true"`
 
-2. **Azure Storage Account - Public Network Access (String) (líneas 28-40)**
+2. **REGLA 2: Azure Storage Account - Public Network Access (String) (líneas 78-105)**
    - Verifica que `public_network_access` (string) sea `"Disabled"` o vacío
    - Convierte a minúsculas para comparación case-insensitive
    - Mensaje: `"Storage account {name} has public_network_access = {value}"`
 
-3. **Azure Storage Account - Public Network Access (Boolean) (líneas 42-54)**
+3. **REGLA 3: Azure Storage Account - Public Network Access (Boolean) (líneas 114-134)**
    - Verifica que `public_network_access_enabled` (boolean) sea `false`
    - Usa función helper `is_boolean()` para validar el tipo
    - Mensaje: `"Storage account {name} has public_network_access_enabled = true (debe ser false)"`
 
-4. **Azure Key Vault - Public Network Access (String) (líneas 56-69)**
+4. **REGLA 4: Azure Key Vault - Public Network Access (String) (líneas 143-164)**
    - Verifica que `public_network_access` (string) sea `"Disabled"` o vacío
    - Mensaje: `"Key Vault {name} has public network access enabled"`
 
-5. **Azure Key Vault - Public Network Access (Boolean) (líneas 71-83)**
+5. **REGLA 5: Azure Key Vault - Public Network Access (Boolean) (líneas 172-189)**
    - Verifica que `public_network_access_enabled` (boolean) sea `false`
    - Mensaje: `"Key Vault {name} has public_network_access_enabled = true (debe ser false)"`
 
-6. **Azure AI Services - Public Network Access (String) (líneas 117-129)**
-   - Verifica que `public_network_access` (string) sea `"Disabled"` o vacío
-   - Mensaje: `"AI service {name} has public_network_access = {value}"`
+6. **REGLA 6: Catch-all para Recursos Genéricos - Public Network Access (String) (líneas 202-231)**
+   - Verifica cualquier recurso con `public_network_access` (string) que no sea `"Disabled"`
+   - Excluye tipos específicos que ya tienen reglas dedicadas para evitar duplicados
+   - Excluye: `azurerm_storage_account`, `azurerm_key_vault`, `azurerm_ai_services`, `azurerm_ai_foundry`, `azurerm_ai_foundry_project`
+   - Mensaje: `"Resource {name} ({type}) has public_network_access = {value}"`
 
-7. **Azure AI Services - Public Network Access (Boolean) (líneas 131-142)**
-   - Verifica que `public_network_access_enabled` (boolean) sea `false`
-   - Mensaje: `"AI service {name} has public network access enabled"`
+7. **REGLA 7: Catch-all para Recursos Genéricos - Public Network Access (Boolean) (líneas 240-258)**
+   - Verifica cualquier recurso con `public_network_access_enabled = true`
+   - Excluye tipos específicos que ya tienen reglas dedicadas
+   - Excluye: `azurerm_storage_account`, `azurerm_key_vault`, `azurerm_ai_services`, `azurerm_ai_foundry`, `azurerm_ai_foundry_project`
+   - Mensaje: `"Resource {name} ({type}) has public_network_access_enabled = true"`
 
-8. **Azure AI Foundry - Public Network Access (String) (líneas 144-157)**
-   - Verifica que `public_network_access` (string) sea `"Disabled"` o vacío
-   - Mensaje: `"AI Foundry {name} has public_network_access = {value}"`
+8. **REGLA 8: Network Security Group - Reglas de Salida a Internet (líneas 273-312)**
+   - Verifica reglas de salida (outbound) que permiten tráfico a Internet
+   - Usa funciones helper `get_destination()` e `is_open_internet()` para identificar destinos públicos
+   - Detecta destinos: `"*"`, `"Internet"`, `"0.0.0.0/0"` (case-insensitive)
+   - Mensaje: `"Network Security Group {name} has an outbound rule '{rule_name}' allowing traffic to {destination}"`
 
-9. **Azure AI Foundry - Public Network Access (Boolean) (líneas 159-170)**
-   - Verifica que `public_network_access_enabled` (boolean) sea `false`
-   - Mensaje: `"AI Foundry {name} has public network access enabled"`
+#### Funciones Helper (líneas 314-528)
 
-10. **Azure AI Foundry Project - Public Network Access (String) (líneas 172-183)**
-    - Verifica que `public_network_access` (string) sea `"Disabled"` o vacío
-    - Mensaje: `"AI Foundry project {name} has public network access enabled"`
-
-11. **Azure AI Foundry Project - Public Network Access (Boolean) (líneas 185-196)**
-    - Verifica que `public_network_access_enabled` (boolean) sea `false`
-    - Mensaje: `"AI Foundry project {name} has public network access enabled"`
-
-12. **Catch-all para Recursos Genéricos - String (líneas 198-217)**
-    - Verifica cualquier recurso con `public_network_access` (string) que no sea `"Disabled"`
-    - Excluye tipos específicos que ya tienen reglas dedicadas para evitar duplicados
-    - Mensaje: `"Resource {name} ({type}) has public_network_access = {value}"`
-
-13. **Catch-all para Recursos Genéricos - Boolean (líneas 219-234)**
-    - Verifica cualquier recurso con `public_network_access_enabled = true`
-    - Excluye tipos específicos que ya tienen reglas dedicadas
-    - Mensaje: `"Resource {name} ({type}) has public_network_access_enabled = true"`
-
-14. **Network Security Group - Outbound Rules (líneas 236-252)**
-    - Verifica reglas de salida (outbound) que permiten tráfico a Internet
-    - Usa funciones helper `get_destination()` e `is_open_internet()` para identificar destinos públicos
-    - Mensaje: `"Network Security Group {name} has an outbound rule '{rule_name}' allowing traffic to {destination}"`
-
-#### Funciones Helper (líneas 268-358)
-
-**`get_first(list)` (líneas 272-284)**
+**`get_first(list)` (líneas 332-349)**
 - Extrae el primer elemento de una lista o retorna un objeto vacío si la lista es null o vacía
 - Útil para acceder a elementos de arrays que pueden estar vacíos
+- Maneja tres casos: lista con elementos, lista null, lista vacía
 
-**`is_array(val)` (líneas 287-289)**
+**`is_array(val)` (líneas 361-366)**
 - Verifica si un valor es un array usando pattern matching de Rego
+- Intenta acceder a un índice arbitrario; si es válido, el valor es un array
 
-**`arrayify(val)` (líneas 292-299)**
+**`arrayify(val)` (líneas 382-393)**
 - Convierte un valor a lista; si ya es una lista, la retorna tal cual
 - Si no es una lista, retorna una lista vacía
 - Útil para normalizar valores que pueden ser arrays o null
 
-**`get_destination(rule)` (líneas 302-322)**
+**`get_destination(rule)` (líneas 412-440)**
 - Determina el prefijo de dirección de destino para una regla de NSG
 - Prioriza `destination_address_prefixes` (array) sobre `destination_address_prefix` (string)
 - Retorna el primer elemento del array si existe, o el string si el array está vacío/null
+- Maneja tres casos: array con elementos, array null, array vacío
 
-**`is_open_internet(prefix)` (líneas 325-338)**
+**`is_open_internet(prefix)` (líneas 455-474)**
 - Verifica si un prefijo de dirección representa acceso abierto a Internet
 - Considera válidos: `"*"`, `"internet"`, `"0.0.0.0/0"` (case-insensitive)
 - Usa `lower()` para normalizar la comparación
+- Maneja tres casos específicos para cada tipo de prefijo
 
-**`exists_deny_outbound(rules)` (líneas 341-348)**
+**`exists_deny_outbound(rules)` (líneas 486-502)**
 - Verifica si existe al menos una regla de salida que deniega tráfico a Internet
-- Actualmente no se usa (regla comentada), pero disponible para futuras validaciones
+- Actualmente no se usa en las reglas activas, pero disponible para futuras validaciones
+- Podría usarse para validar que existe una regla de denegación explícita
 
-**`is_boolean(x)` (líneas 351-357)**
+**`is_boolean(x)` (líneas 520-527)**
 - Verifica si un valor es de tipo booleano
 - Retorna true si el valor es `true` o `false`
+- No se define (retorna false implícitamente) si el valor es null, string, number, etc.
 
-#### Regla de Violaciones (líneas 369-371)
+#### Regla de Violaciones (líneas 545-549)
 
 ```rego
 violations if {
@@ -505,14 +562,11 @@ violations if {
 }
 ```
 
-- Esta regla booleana se define solo cuando hay violaciones
+- Esta regla booleana se define solo cuando hay violaciones (cuando el conjunto `deny` tiene elementos)
 - Útil para usar con `--fail-defined` en OPA CLI para que el comando salga con código de error no-cero si existen violaciones
 - Ejemplo de uso: `opa eval --fail-defined "data.terraform.deny_public_internet.violations"`
-
-#### Reglas Comentadas
-
-- **Key Vault Network ACLs (líneas 85-115)**: Reglas para validar `network_acls.default_action` y `network_acls.bypass` están deshabilitadas
-- **NSG Outbound Deny Rule Check (líneas 254-266)**: Regla para verificar que exista una regla de denegación de salida está deshabilitada
+- Si hay violaciones, `violations` se define y el comando falla
+- Si no hay violaciones, `violations` no se define y el comando tiene éxito
 
 ---
 
@@ -664,37 +718,30 @@ opa eval --input "..\Terraform\tfplan.json" --data "deny_public_internet.rego" -
 La política `deny_public_internet.rego` valida los siguientes recursos y configuraciones:
 
 ### ✅ Azure Storage Account (`azurerm_storage_account`)
-- `allow_blob_public_access` debe ser `false` o no estar presente
-- `public_network_access_enabled` (boolean) debe ser `false` o no estar presente
-- `public_network_access` (string) debe ser `"Disabled"`, vacío, o no estar presente
+- **REGLA 1**: `allow_blob_public_access` debe ser `false` o no estar presente
+- **REGLA 2**: `public_network_access` (string) debe ser `"Disabled"`, vacío, o no estar presente (comparación case-insensitive)
+- **REGLA 3**: `public_network_access_enabled` (boolean) debe ser `false` o no estar presente
 
 ### ✅ Azure Key Vault (`azurerm_key_vault`)
-- `public_network_access_enabled` (boolean) debe ser `false` o no estar presente
-- `public_network_access` (string) debe ser `"Disabled"`, vacío, o no estar presente
-- **Nota**: Las validaciones de `network_acls` están actualmente deshabilitadas en el código
-
-### ✅ Azure AI Services (`azurerm_ai_services`)
-- `public_network_access_enabled` (boolean) debe ser `false` o no estar presente
-- `public_network_access` (string) debe ser `"Disabled"`, vacío, o no estar presente
-
-### ✅ Azure AI Foundry (`azurerm_ai_foundry`)
-- `public_network_access_enabled` (boolean) debe ser `false` o no estar presente
-- `public_network_access` (string) debe ser `"Disabled"`, vacío, o no estar presente
-
-### ✅ Azure AI Foundry Project (`azurerm_ai_foundry_project`)
-- `public_network_access_enabled` (boolean) debe ser `false` o no estar presente
-- `public_network_access` (string) debe ser `"Disabled"`, vacío, o no estar presente
+- **REGLA 4**: `public_network_access` (string) debe ser `"Disabled"`, vacío, o no estar presente (comparación case-insensitive)
+- **REGLA 5**: `public_network_access_enabled` (boolean) debe ser `false` o no estar presente
 
 ### ✅ Network Security Groups (`azurerm_network_security_group`)
-- No debe haber reglas de salida (outbound) con `access = "Allow"` que permitan tráfico a:
-  - `"*"` (cualquier destino)
-  - `"Internet"` (tag de Azure)
-  - `"0.0.0.0/0"` (toda la red)
+- **REGLA 8**: No debe haber reglas de salida (outbound) con `direction = "Outbound"` y `access = "Allow"` que permitan tráfico a:
+  - `"*"` (cualquier destino - wildcard)
+  - `"Internet"` (tag de Azure que representa Internet)
+  - `"0.0.0.0/0"` (notación CIDR que representa toda la red IPv4)
+- La validación es case-insensitive y maneja tanto `destination_address_prefix` (string) como `destination_address_prefixes` (array)
 
 ### ✅ Recursos Genéricos (Catch-all)
-- Cualquier recurso con `public_network_access_enabled = true` será rechazado
-- Cualquier recurso con `public_network_access` (string) != `"Disabled"` será rechazado
-- Excluye tipos específicos que ya tienen reglas dedicadas para evitar mensajes duplicados
+- **REGLA 6**: Cualquier recurso con `public_network_access` (string) != `"Disabled"` será rechazado
+- **REGLA 7**: Cualquier recurso con `public_network_access_enabled = true` será rechazado
+- Excluye tipos específicos que ya tienen reglas dedicadas para evitar mensajes duplicados:
+  - `azurerm_storage_account`
+  - `azurerm_key_vault`
+  - `azurerm_ai_services`
+  - `azurerm_ai_foundry`
+  - `azurerm_ai_foundry_project`
 
 ---
 
@@ -909,9 +956,70 @@ Para probar que la política funciona correctamente:
 
 ## Referencias
 
+### Conceptos Clave que Debes Entender
+
+#### 1. **Lenguaje Rego**
+- Lenguaje declarativo diseñado para políticas
+- Basado en lógica de primer orden
+- Sintaxis clara y expresiva
+- Ejemplo:
+  ```rego
+  deny contains msg if {
+      input.resource_changes[i].type == "azurerm_storage_account"
+      input.resource_changes[i].change.after.public_network_access_enabled == true
+      msg := "Storage account has public access enabled"
+  }
+  ```
+
+#### 2. **Reglas y Conjuntos**
+- **Reglas**: Definen condiciones y resultados
+- **Conjuntos**: Colecciones de valores (como `deny`)
+- **Múltiples reglas**: Todas se evalúan y agregan al conjunto
+
+#### 3. **Input Data**
+- Datos que OPA evalúa contra las políticas
+- En este proyecto: plan de Terraform en JSON
+- Acceso: `input.resource_changes[i].change.after`
+
+#### 4. **Queries**
+- Consultas que extraen información de las políticas
+- Ejemplo: `data.terraform.deny_public_internet.deny`
+- Retorna el conjunto de violaciones encontradas
+
+#### 5. **Funciones Helper**
+- Funciones auxiliares para reutilizar lógica
+- Simplifican reglas complejas
+- Ejemplo: `is_boolean()`, `arrayify()`, `is_open_internet()`
+
+#### 6. **Evaluación**
+- OPA evalúa todas las reglas contra el input
+- Si una regla se cumple, agrega al conjunto de resultados
+- Retorna todas las violaciones encontradas
+
+### Próximos Pasos en tu Aprendizaje
+
+1. **Básico**: Entiende la sintaxis Rego y cómo escribir reglas simples
+2. **Intermedio**: Aprende a usar funciones helper y manejar arrays/objetos
+3. **Avanzado**: Crea políticas complejas con múltiples condiciones
+4. **Expert**: Integra OPA en pipelines CI/CD y múltiples plataformas
+
+### Documentación Oficial
+
 - [Documentación de OPA](https://www.openpolicyagent.org/docs/latest/)
 - [Lenguaje Rego](https://www.openpolicyagent.org/docs/latest/policy-language/)
+- [OPA Policy Examples](https://www.openpolicyagent.org/docs/latest/policy-examples/)
 - [Terraform Plan Format](https://www.terraform.io/docs/internals/json-format.html)
-- [Azure Resource Manager Terraform Provider](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs)
-- [OPA GitHub Releases](https://github.com/open-policy-agent/opa/releases)
+
+### Tutoriales y Recursos
+
 - [OPA Playground](https://play.openpolicyagent.org/) - Para probar políticas Rego en línea
+- [OPA Tutorials](https://www.openpolicyagent.org/docs/latest/tutorials/)
+- [Rego by Example](https://github.com/StyraInc/rego-by-example)
+- [Azure Resource Manager Terraform Provider](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs)
+
+### Comunidad y Soporte
+
+- [OPA GitHub](https://github.com/open-policy-agent/opa)
+- [OPA Slack](https://slack.openpolicyagent.org/)
+- [OPA Discourse](https://discuss.openpolicyagent.org/)
+- [Stack Overflow - OPA Tag](https://stackoverflow.com/questions/tagged/open-policy-agent)

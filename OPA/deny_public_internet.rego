@@ -5,11 +5,19 @@
 # público a Internet habilitado. Analiza los cambios de recursos en el plan
 # (formato tfplan/v2) y emite mensajes en el conjunto `deny` para cada violación.
 #
+# Esta política contiene únicamente las reglas y funciones que se evalúan
+# cuando se ejecuta el script evaluar_politica.ps1, que consulta:
+# data.terraform.deny_public_internet.deny
+#
 # Recursos validados:
 # - Azure Storage Account (blob público y acceso de red público)
 # - Azure Key Vault (acceso de red público)
 # - Network Security Groups (reglas de salida que permiten tráfico a Internet)
-# - Recursos genéricos con flags de acceso público
+# - Recursos genéricos con flags de acceso público (catch-all)
+#
+# Total de reglas: 8 reglas deny + 1 regla violations (para CI/CD)
+# Funciones helper: 5 funciones (is_array, arrayify, get_destination, 
+#                                  is_open_internet, is_boolean)
 # ==============================================================================
 
 # Declaración del paquete: define el namespace de la política
@@ -27,6 +35,14 @@ import rego.v1
 # Cada regla `deny` se evalúa independientemente. Si una regla se cumple,
 # se agrega un mensaje al conjunto `deny`. Todas las reglas se evalúan
 # para cada recurso en el plan de Terraform.
+#
+# Resumen de reglas:
+# - REGLA 1-3: Azure Storage Account (blob access, public network access string/boolean)
+# - REGLA 4-5: Azure Key Vault (public network access string/boolean)
+# - REGLA 6-7: Catch-all para recursos genéricos (public network access string/boolean)
+# - REGLA 8: Network Security Groups (reglas de salida a Internet)
+#
+# Todas estas reglas se evalúan cuando se consulta: data.terraform.deny_public_internet.deny
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -198,6 +214,12 @@ deny contains msg if {
 # IMPORTANTE: Excluimos tipos de recursos que ya tienen reglas específicas para
 # evitar mensajes duplicados. Si un recurso tiene una regla específica, esa regla
 # se encarga de generar el mensaje con más contexto.
+#
+# Tipos excluidos (tienen reglas específicas):
+# - azurerm_storage_account (REGLA 2)
+# - azurerm_key_vault (REGLA 4)
+# - azurerm_ai_services, azurerm_ai_foundry, azurerm_ai_foundry_project
+#   (excluidos para evitar duplicados, aunque no tienen reglas específicas activas)
 # ------------------------------------------------------------------------------
 deny contains msg if {
     some i
@@ -236,6 +258,15 @@ deny contains msg if {
 # Similar a la regla anterior, pero para la propiedad boolean
 # `public_network_access_enabled`. Captura cualquier recurso que tenga esta
 # propiedad configurada como `true`.
+#
+# IMPORTANTE: Excluimos tipos de recursos que ya tienen reglas específicas para
+# evitar mensajes duplicados.
+#
+# Tipos excluidos (tienen reglas específicas):
+# - azurerm_storage_account (REGLA 3)
+# - azurerm_key_vault (REGLA 5)
+# - azurerm_ai_services, azurerm_ai_foundry, azurerm_ai_foundry_project
+#   (excluidos para evitar duplicados, aunque no tienen reglas específicas activas)
 # ------------------------------------------------------------------------------
 deny contains msg if {
     some i
@@ -317,36 +348,10 @@ deny contains msg if {
 # Estas funciones auxiliares simplifican la lógica de las reglas y permiten
 # reutilizar código común. Facilitan el mantenimiento y hacen el código más
 # legible.
-# ==============================================================================
-
-# ------------------------------------------------------------------------------
-# FUNCIÓN: get_first(list)
-# ------------------------------------------------------------------------------
-# Extrae el primer elemento de una lista o retorna un objeto vacío si la lista
-# es null o vacía. Útil para acceder a elementos de arrays que pueden estar
-# vacíos o ser null.
 #
-# Ejemplo de uso: Acceder al primer elemento de network_acls en Key Vault
-# ------------------------------------------------------------------------------
-# Caso 1: La lista existe y tiene elementos
-get_first(list) := obj if {
-    # Verificar que la lista no es null
-    list != null
-    # Verificar que la lista no está vacía
-    list != []
-    # Retornar el primer elemento (índice 0)
-    obj := list[0]
-}
-
-# Caso 2: La lista es null
-get_first(list) := {} if {
-    list == null
-}
-
-# Caso 3: La lista está vacía
-get_first(list) := {} if {
-    list == []
-}
+# NOTA: Solo se incluyen las funciones que son utilizadas por las reglas activas.
+# Funciones no utilizadas han sido eliminadas para mantener el código limpio.
+# ==============================================================================
 
 # ------------------------------------------------------------------------------
 # FUNCIÓN: is_array(val)
@@ -354,6 +359,8 @@ get_first(list) := {} if {
 # Verifica si un valor es un array usando pattern matching de Rego.
 # En Rego, podemos verificar si un valor es un array intentando acceder
 # a un índice arbitrario. Si el acceso es válido, es un array.
+#
+# Uso: Utilizada por la función arrayify() para verificar el tipo de dato.
 #
 # Ejemplo: is_array([1, 2, 3]) retorna true
 #          is_array("string") retorna false
@@ -373,6 +380,8 @@ is_array(val) if {
 #
 # Útil para normalizar valores que pueden ser arrays o null, permitiendo
 # iterar sobre ellos de forma segura sin errores.
+#
+# Uso: Utilizada en REGLA 8 para normalizar security_rule en Network Security Groups.
 #
 # Ejemplo: arrayify([1, 2]) retorna [1, 2]
 #          arrayify(null) retorna []
@@ -402,6 +411,8 @@ arrayify(val) := [] if {
 #
 # Esta función prioriza el array si existe y tiene elementos, y hace
 # fallback al string si el array está vacío o es null.
+#
+# Uso: Utilizada en REGLA 8 para obtener el destino de las reglas de NSG.
 #
 # Ejemplo: Si rule tiene destination_address_prefixes = ["0.0.0.0/0", "10.0.0.0/8"],
 #          retorna "0.0.0.0/0" (primer elemento)
@@ -444,12 +455,15 @@ get_destination(rule) := dest if {
 # ------------------------------------------------------------------------------
 # Verifica si un prefijo de dirección representa acceso abierto a Internet.
 # Considera válidos los siguientes valores (case-insensitive):
-# - "*" (cualquier destino)
+# - "*" (cualquier destino - wildcard)
 # - "internet" (tag de Azure que representa Internet)
 # - "0.0.0.0/0" (notación CIDR que representa toda la red IPv4)
 #
 # Esta función usa `lower()` para normalizar la comparación y hacerla
 # case-insensitive, manejando variaciones como "Internet", "INTERNET", etc.
+#
+# Uso: Utilizada en REGLA 8 para identificar si una regla de NSG permite
+#      tráfico a Internet abierto.
 # ------------------------------------------------------------------------------
 # Caso 1: El prefijo es "*" (wildcard - cualquier destino)
 is_open_internet(prefix) if {
@@ -474,34 +488,6 @@ is_open_internet(prefix) if {
 }
 
 # ------------------------------------------------------------------------------
-# FUNCIÓN: exists_deny_outbound(rules)
-# ------------------------------------------------------------------------------
-# Verifica si existe al menos una regla de salida que deniega tráfico a Internet.
-# Esta función está disponible para futuras validaciones, pero actualmente
-# no se usa en las reglas activas.
-#
-# Podría usarse para validar que existe una regla de denegación explícita
-# además de verificar que no hay reglas de permitir.
-# ------------------------------------------------------------------------------
-exists_deny_outbound(rules) if {
-    # Iterar sobre todas las reglas
-    some k
-    rule := rules[k]
-    
-    # Verificar que la regla es de dirección "outbound"
-    lower(rule.direction) == "outbound"
-    
-    # Verificar que la regla tiene acceso "deny" (denegar)
-    lower(rule.access) == "deny"
-    
-    # Obtener el destino de la regla
-    dest := get_destination(rule)
-    
-    # Verificar si el destino es Internet abierto
-    is_open_internet(dest)
-}
-
-# ------------------------------------------------------------------------------
 # FUNCIÓN: is_boolean(x)
 # ------------------------------------------------------------------------------
 # Verifica si un valor es de tipo booleano.
@@ -510,6 +496,10 @@ exists_deny_outbound(rules) if {
 #
 # Esta función es útil para validar tipos antes de hacer comparaciones,
 # evitando falsos positivos cuando un campo puede tener diferentes tipos.
+#
+# Uso: Utilizada en REGLA 3 (Storage Account) y REGLA 5 (Key Vault) para
+#      validar que public_network_access_enabled es realmente un boolean
+#      antes de compararlo con true.
 #
 # Ejemplo: is_boolean(true) retorna true
 #          is_boolean(false) retorna true
@@ -533,6 +523,10 @@ is_boolean(x) if {
 # `deny` tiene elementos). Es útil para usar con `--fail-defined` en OPA CLI,
 # lo que hace que el comando salga con código de error no-cero si existen
 # violaciones.
+#
+# NOTA: Esta regla no se evalúa directamente por evaluar_politica.ps1, pero
+# está disponible para uso en pipelines de CI/CD que requieren fallar
+# automáticamente cuando hay violaciones.
 #
 # Uso en CI/CD:
 #   opa eval --input ../Terraform/tfplan.json \

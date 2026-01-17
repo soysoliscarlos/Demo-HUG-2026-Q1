@@ -6,7 +6,7 @@ resource "azurerm_storage_account" "storage" {
   account_replication_type = "LRS"
 
   # Habilitar acceso de red privado
-  public_network_access_enabled = true
+  public_network_access_enabled = false
 
   tags = local.etiquetas_comunes
 }

@@ -2,6 +2,74 @@
 
 Este directorio contiene la configuración y datos de HashiCorp Vault para el entorno de desarrollo local. Vault se utiliza para almacenar de forma segura las credenciales de Azure que consume Terraform, evitando exponer secretos en archivos de configuración.
 
+## 🎓 ¿Qué es HashiCorp Vault?
+
+**HashiCorp Vault** es una herramienta para gestionar secretos y proteger datos sensibles. Permite almacenar, acceder y distribuir secretos de forma segura (contraseñas, API keys, certificados, etc.) sin exponerlos en código o archivos de configuración.
+
+### Conceptos Clave de Vault
+
+#### 1. **Secretos (Secrets)**
+- Datos sensibles que Vault almacena de forma encriptada
+- Ejemplos: contraseñas, tokens, claves API, certificados
+- En este proyecto: credenciales de Azure (tenant_id, client_id, client_secret)
+
+#### 2. **Secrets Engines**
+- Sistemas de almacenamiento de secretos con diferentes características
+- **KV (Key-Value)**: Almacenamiento simple de pares clave-valor
+- **KV v2**: Versión mejorada con versionado y políticas de borrado
+- En este proyecto usamos **KV v2** en la ruta `kv/`
+
+#### 3. **Autenticación (Authentication)**
+- Métodos para verificar la identidad de usuarios/aplicaciones
+- **Tokens**: Método más común, similar a contraseñas temporales
+- **Root Token**: Token de administrador con todos los permisos (solo para configuración inicial)
+
+#### 4. **Políticas (Policies)**
+- Reglas que definen qué secretos puede leer/escribir cada usuario/aplicación
+- Usa el lenguaje HCL (HashiCorp Configuration Language)
+- Permite aplicar el principio de menor privilegio
+
+#### 5. **Unseal (Desbloqueo)**
+- Vault inicia en estado "sealed" (sellado) por seguridad
+- Requiere proporcionar "Unseal Keys" para desbloquearlo
+- En este proyecto: 5 keys, necesitas 3 para desbloquear (threshold)
+
+#### 6. **Storage Backend**
+- Dónde Vault almacena sus datos encriptados
+- En desarrollo: sistema de archivos local (`storage "file"`)
+- En producción: Azure Storage, Consul, etcd, etc.
+
+### ¿Por qué usar Vault?
+
+✅ **Seguridad**: Secretos encriptados, nunca en texto plano  
+✅ **Control de Acceso**: Políticas granulares por usuario/aplicación  
+✅ **Auditoría**: Registro de quién accedió a qué secreto y cuándo  
+✅ **Rotación**: Facilita la rotación automática de credenciales  
+✅ **Integración**: APIs REST para integrar con cualquier aplicación  
+✅ **Centralización**: Un solo lugar para gestionar todos los secretos
+
+### Flujo de Trabajo con Vault
+
+```
+1. Iniciar Vault → 2. Unseal (desbloquear) → 3. Autenticarse → 4. Leer/Escribir secretos
+     ↓                    ↓                        ↓                    ↓
+  Servidor            Con keys              Con token          Operaciones seguras
+```
+
+### En este Proyecto
+
+Vault almacena las credenciales de Azure que Terraform necesita para autenticarse:
+
+```
+Vault Path: kv/spn/terraform-servicePrincipal
+├── tenant_id
+├── subscription_id
+├── client_id
+└── client_secret
+```
+
+Terraform lee estas credenciales automáticamente sin exponerlas en archivos `.tf` o `.tfvars`.
+
 ## 📁 Estructura de Directorios
 
 ```
@@ -1139,10 +1207,60 @@ echo $env:TF_VAR_vault_token
 - [Vault Best Practices](https://developer.hashicorp.com/vault/docs/best-practices)
 - [Vault Security Hardening](https://developer.hashicorp.com/vault/docs/security)
 
+### Conceptos Clave que Debes Entender
+
+#### 1. **Secrets Engines**
+- Sistemas de almacenamiento con diferentes características
+- **KV (Key-Value)**: Simple almacenamiento clave-valor
+- **KV v2**: Versión mejorada con versionado, políticas de borrado y metadatos
+- **Otros**: Database, AWS, Azure, PKI, etc.
+
+#### 2. **Paths y Mounts**
+- Cada secrets engine se monta en una ruta (path)
+- Ejemplo: `kv/` es el mount point del engine KV
+- Los secretos se almacenan como: `kv/ruta/al/secreto`
+- En este proyecto: `kv/spn/terraform-servicePrincipal`
+
+#### 3. **Tokens y Autenticación**
+- **Tokens**: Credenciales temporales para acceder a Vault
+- **Root Token**: Token de administrador (solo para setup inicial)
+- **Service Tokens**: Tokens con permisos limitados (recomendado)
+- **TTL (Time To Live)**: Tiempo de vida del token
+
+#### 4. **Políticas HCL**
+- Definen qué puede hacer cada token/usuario
+- Sintaxis:
+  ```hcl
+  path "kv/data/spn/*" {
+    capabilities = ["read"]
+  }
+  ```
+- **Capabilities**: `read`, `write`, `list`, `delete`, `sudo`
+
+#### 5. **Unseal Process**
+- Vault inicia sellado (sealed) por seguridad
+- Requiere Unseal Keys para desbloquear
+- **Shamir Secret Sharing**: Divide la clave maestra en múltiples partes
+- En este proyecto: 5 keys, necesitas 3 (threshold)
+
+#### 6. **Storage Backends**
+- Dónde Vault guarda datos encriptados
+- **File**: Sistema de archivos (desarrollo)
+- **Consul**: Backend distribuido (producción)
+- **Azure Storage**: Backend en la nube (producción)
+
+### Próximos Pasos en tu Aprendizaje
+
+1. **Básico**: Entiende cómo almacenar y leer secretos
+2. **Intermedio**: Aprende a crear políticas y tokens con permisos limitados
+3. **Avanzado**: Configura auto-unseal y backends remotos
+4. **Expert**: Implementa rotación automática y auditoría completa
+
 ### Comunidad y Soporte
 - [HashiCorp Community Forum](https://discuss.hashicorp.com/c/vault)
 - [Vault GitHub](https://github.com/hashicorp/vault)
 - [Stack Overflow - HashiCorp Vault](https://stackoverflow.com/questions/tagged/vault)
+- [Vault Discord](https://discord.gg/hashicorp)
 
 ---
 

@@ -2,8 +2,64 @@
 
 Este proyecto de Terraform despliega una infraestructura segura en Azure con red privada, endpoints privados y recursos para cargas de trabajo RAG (Retrieval-Augmented Generation).
 
+## 🎓 ¿Qué es Terraform?
+
+**Terraform** es una herramienta de código abierto desarrollada por HashiCorp que permite definir, crear y gestionar infraestructura como código (Infrastructure as Code - IaC). Con Terraform, puedes describir tu infraestructura en archivos de configuración declarativos y versionarla como cualquier otro código.
+
+### Conceptos Clave de Terraform
+
+#### 1. **Infrastructure as Code (IaC)**
+- Define tu infraestructura usando archivos de texto (`.tf`)
+- Versiona los cambios con Git
+- Reproduce entornos de forma consistente
+- Colabora en equipo con revisiones de código
+
+#### 2. **Estado de Terraform (State)**
+- Archivo `terraform.tfstate` que guarda el estado actual de tu infraestructura
+- Mapea recursos de Terraform a recursos reales en Azure
+- Permite a Terraform saber qué crear, actualizar o destruir
+- **Importante**: Nunca edites manualmente el estado
+
+#### 3. **Proveedores (Providers)**
+- Plugins que permiten a Terraform interactuar con diferentes plataformas
+- En este proyecto usamos:
+  - `azurerm`: Para crear recursos en Azure
+  - `vault`: Para leer secretos de HashiCorp Vault
+  - `random`: Para generar valores aleatorios (prefijos, contraseñas, etc.)
+
+#### 4. **Recursos (Resources)**
+- Bloques que representan componentes de infraestructura
+- Ejemplo: `azurerm_storage_account` crea una cuenta de almacenamiento en Azure
+- Cada recurso tiene un tipo y un nombre único
+
+#### 5. **Variables y Outputs**
+- **Variables**: Valores de entrada configurables (ej: nombres, regiones)
+- **Outputs**: Valores de salida útiles después del despliegue (ej: IDs, URIs)
+
+#### 6. **Plan y Apply**
+- `terraform plan`: Muestra qué cambios se realizarán (sin aplicar)
+- `terraform apply`: Aplica los cambios y crea/modifica recursos reales
+
+### ¿Por qué usar Terraform?
+
+✅ **Reproducibilidad**: Crea el mismo entorno múltiples veces  
+✅ **Versionado**: Controla cambios con Git  
+✅ **Colaboración**: Trabaja en equipo con revisiones de código  
+✅ **Automatización**: Integra con CI/CD para despliegues automáticos  
+✅ **Multi-nube**: Mismo lenguaje para Azure, AWS, GCP, etc.  
+✅ **Documentación**: El código es la documentación de tu infraestructura
+
+### Flujo de Trabajo con Terraform
+
+```
+1. Escribir código (.tf) → 2. terraform init → 3. terraform plan → 4. terraform apply
+     ↓                                                                    ↓
+  Git commit                                                      Infraestructura creada
+```
+
 ## 📋 Tabla de Contenidos
 
+- [¿Qué es Terraform?](#-qué-es-terraform)
 - [Descripción General](#descripción-general)
 - [Arquitectura](#arquitectura)
 - [Archivos de Configuración](#archivos-de-configuración)
@@ -1276,17 +1332,79 @@ terraform destroy \
 
 ## 🎓 Recursos de Aprendizaje
 
+### Conceptos Clave que Debes Entender
+
+#### 1. **HCL (HashiCorp Configuration Language)**
+- Lenguaje de configuración usado por Terraform
+- Sintaxis similar a JSON pero más legible
+- Ejemplo:
+  ```hcl
+  resource "azurerm_storage_account" "example" {
+    name                     = "mystorageaccount"
+    resource_group_name      = "myrg"
+    location                 = "eastus"
+    account_tier             = "Standard"
+    account_replication_type = "LRS"
+  }
+  ```
+
+#### 2. **Resource Blocks**
+- Cada recurso tiene un tipo (`azurerm_storage_account`) y un nombre (`example`)
+- El nombre es local al archivo, no es el nombre real en Azure
+- El nombre real se define dentro del bloque con propiedades como `name`
+
+#### 3. **Data Sources**
+- Permiten leer información de recursos existentes
+- No crean recursos, solo consultan
+- Ejemplo: `data "azurerm_client_config"` obtiene información del usuario actual
+
+#### 4. **Variables y Locals**
+- **Variables**: Valores de entrada del usuario (definidas en `variables.tf`)
+- **Locals**: Valores calculados internamente (definidas en `locals.tf`)
+- **Outputs**: Valores de salida útiles después del despliegue
+
+#### 5. **State Management**
+- `terraform.tfstate` mapea recursos de código a recursos reales
+- Nunca edites manualmente el estado
+- En producción, usa backend remoto (Azure Storage, S3, etc.)
+
+#### 6. **Dependency Graph**
+- Terraform calcula automáticamente el orden de creación
+- Si el recurso B depende de A, Terraform crea A primero
+- Usa `depends_on` para dependencias explícitas
+
+### Próximos Pasos en tu Aprendizaje
+
+1. **Básico**: Entiende la sintaxis HCL y cómo crear recursos simples
+2. **Intermedio**: Aprende a usar variables, outputs y data sources
+3. **Avanzado**: Domina módulos, workspaces y backends remotos
+4. **Expert**: Crea módulos reutilizables y automatiza con CI/CD
+
 ### Documentación Oficial
 
 - [Terraform para Azure](https://learn.microsoft.com/azure/developer/terraform/)
 - [HashiCorp Vault](https://developer.hashicorp.com/vault/docs)
 - [Azure Provider para Terraform](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs)
+- [Terraform Language Documentation](https://developer.hashicorp.com/terraform/language)
 
 ### Tutoriales Recomendados
 
 - [Terraform en Azure - Microsoft Learn](https://learn.microsoft.com/azure/developer/terraform/get-started-cloud-shell)
+- [Terraform Learn - HashiCorp](https://learn.hashicorp.com/terraform)
 - [Vault Getting Started](https://developer.hashicorp.com/vault/tutorials/getting-started)
 - [Azure Private Endpoints](https://learn.microsoft.com/azure/private-link/private-endpoint-overview)
+
+### Cursos y Certificaciones
+
+- [HashiCorp Certified: Terraform Associate](https://www.hashicorp.com/certification/terraform-associate)
+- [Microsoft Learn - Azure Infrastructure](https://learn.microsoft.com/azure/)
+- [Pluralsight - Terraform Courses](https://www.pluralsight.com/browse/software-development/terraform)
+
+### Comunidad y Soporte
+
+- [Terraform Community Forum](https://discuss.hashicorp.com/c/terraform-core)
+- [Terraform GitHub](https://github.com/hashicorp/terraform)
+- [Stack Overflow - Terraform Tag](https://stackoverflow.com/questions/tagged/terraform)
 
 ## 👥 Contribuciones
 
