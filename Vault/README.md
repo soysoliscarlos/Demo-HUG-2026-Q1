@@ -134,9 +134,9 @@ Este archivo contiene la salida del comando `vault operator init` y contiene inf
 #### Contenido del Archivo
 
 ```
-Unseal Key 1: ZAC2YOht56WrEk3b9LIQMLf84d1UfO2j8Sd/6HRPI2MC
-Unseal Key 2: <UNSEAL_KEY_1>
-Unseal Key 3: <UNSEAL_KEY_2>
+Unseal Key 1: <UNSEAL_KEY_1>
+Unseal Key 2: <UNSEAL_KEY_2>
+Unseal Key 3: <UNSEAL_KEY_3>
 Unseal Key 4: <UNSEAL_KEY_4>
 Unseal Key 5: <UNSEAL_KEY_5>
 
