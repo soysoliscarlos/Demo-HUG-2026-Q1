@@ -9,7 +9,7 @@ Este proyecto te enseñará:
 - ✅ **Terraform**: Cómo definir infraestructura como código en Azure
 - ✅ **HashiCorp Vault**: Cómo gestionar secretos de forma segura
 - ✅ **OPA**: Cómo validar políticas de seguridad antes de aplicar cambios
-- ✅ **Azure Networking**: Private Endpoints, Private DNS Zones, VNet Peering
+- ✅ **Azure Networking**: Private Endpoints, Private DNS Zones, Azure Bastion
 - ✅ **Seguridad en la Nube**: Redes privadas, acceso restringido, validación automática
 
 ## 🏗️ Componentes del Proyecto
@@ -18,11 +18,12 @@ Este proyecto te enseñará:
 Define y despliega recursos de Azure de forma declarativa:
 - Virtual Network (VNet) con subredes dedicadas
 - Network Security Groups (NSG)
+- Azure Bastion Host para acceso seguro a VMs
+- Windows Virtual Machine con Azure AD Login
 - Private Endpoints para Storage y Key Vault
 - Private DNS Zones para resolución DNS privada
 - Storage Account con acceso privado
 - Key Vault con RBAC habilitado
-- VNet Peering para conectividad híbrida
 
 📖 **[Ver documentación completa de Terraform →](Terraform/README.md)**
 
@@ -150,11 +151,15 @@ Este proyecto demuestra cómo tres herramientas trabajan juntas para crear infra
 ## 🏗️ Arquitectura Resumida
 
 - **Red**
-  - VNet principal con subnets para apps, datos y una subnet dedicada a Private Endpoints
-  - Peering con una VNet existente `Vnet-Jumpbox` (RG `RG-VM-Jumpbox`)
-  - NSGs por subnet
+  - VNet principal con subnets configurables (incluyendo subnet para Azure Bastion y subnet para VM)
+  - NSGs por subnet (excepto subnet de Bastion)
+  - Azure Bastion Host para acceso seguro a VMs
   - Private Endpoints para: Storage (Blob/File) y Key Vault
-  - Private DNS Zones enlazadas a la VNet local y a la VNet remota (peering)
+  - Private DNS Zones enlazadas a la VNet local
+- **Compute**
+  - Windows Virtual Machine (Standard_B2s, Windows Server 2022)
+  - Azure AD Login habilitado (sin necesidad de contraseñas locales)
+  - Acceso mediante Azure Bastion (sin exponer RDP públicamente)
 - **Servicios de datos y secretos**
   - Storage Account (acceso público deshabilitado)
   - Key Vault (RBAC enabled, acceso público deshabilitado)
@@ -173,26 +178,28 @@ Ubicación: `Terraform/`
 ### Recursos principales (archivos .tf)
 
 - `resource_group.tf`: Resource Group
-- `vnet.tf`: VNet, subnets, NSGs y asociaciones
-- `private_endpoints.tf`: Private Endpoints + Private DNS Zones y VNet Links (local y remota)
-- `storage.tf`: Storage Account + Container (acceso público deshabilitado)
-- `key_vault.tf`: Key Vault (RBAC, acceso público deshabilitado)
-- `peering.tf`: Peering entre la VNet local y `Vnet-Jumpbox`
-- `outputs.tf`: Salidas útiles (ids, nombres, DNS zones, etc.)
+- `vnet.tf`: VNet, subnets, NSGs, Azure Bastion Host y Public IP
+- `vm.tf`: Virtual Machine Windows, Network Interface, VM Extension y Role Assignments
+- `private_endpoints.tf`: Private Endpoints + Private DNS Zones y VNet Links
+- `storage.tf`: Storage Account (acceso público deshabilitado)
+- `key_vault.tf`: Key Vault (RBAC, acceso público deshabilitado) y Role Assignment
+- `outputs.tf`: Salidas útiles (ids, nombres, DNS zones, IPs, etc.)
 - `variables.tf` y `locals.tf`: variables de entrada y etiquetas comunes
 - `backend.tf`: backend local por defecto
 - `vault.tf`: Configuración del proveedor Vault y data source para credenciales
-- `data.tf`: Data sources (configuración del cliente Azure y VNet remota)
-- `random.tf`: Generación de prefijo aleatorio para nombres de recursos
+- `data.tf`: Data sources (configuración del cliente Azure)
+- `random.tf`: Generación de prefijo aleatorio y contraseña para la VM
 - `main.tf`: Archivo de referencia (recursos organizados en archivos individuales)
 
 ### Variables clave (extracto)
 
 - Despliegue y tagging: `environment`, `tags`
 - RG y región: `resource_group_name`, `location`
-- Red: `vnet_name`, `vnet_address_space`, `subnets` (mapa con name/prefixes/optional delegation)
-- Storage: `storage_account_name`, `container_name`, `container_access_type`
+- Red: `vnet_name`, `vnet_address_space`, `subnets` (mapa con name/prefixes/optional delegation/service_endpoints)
+  - **Importante**: Requiere una subnet llamada `subnet_bastion` con nombre `AzureBastionSubnet` y tamaño mínimo `/26`
+- Storage: `storage_account_name`
 - Key Vault: `key_vault_name`, `key_vault_sku`
+- Virtual Machine: `vm_azure_ad_group_object_id` (Object ID del grupo de Azure AD con acceso a la VM)
 - Vault: `vault_token` (sensible, se pasa como variable de entorno)
 
 Revisa `Terraform/terraform.tfvars.example` para un ejemplo de valores. Nota: las credenciales de Azure no van en `.tfvars`, van en Vault.
@@ -419,11 +426,15 @@ Para más detalles, consulta la [documentación completa de Vault](Vault/README.
   - En Key Vault, ajusta `public_network_access_enabled = false`
   - Revisa NSGs para reglas outbound que permitan tráfico a Internet
 - DNS/Resolución privada
-  - Revisa los `private_dns_zone_virtual_network_link` para la VNet local y la VNet remota (`Vnet-Jumpbox`)
-  - Verifica que la VNet remota exista en el Resource Group `RG-VM-Jumpbox`
+  - Revisa los `private_dns_zone_virtual_network_link` para la VNet local
+  - Verifica que las Private DNS Zones estén correctamente enlazadas
+- Azure Bastion y VM
+  - Verifica que la subnet `subnet_bastion` tenga el nombre exacto `AzureBastionSubnet` y tamaño mínimo `/26`
+  - Asegúrate de que el grupo de Azure AD especificado en `vm_azure_ad_group_object_id` existe y tiene miembros
+  - Para acceder a la VM, usa Azure Bastion desde el portal de Azure (no RDP directo)
 - Permisos
   - El principal usado debe tener permisos suficientes (Owner/Contributor) para crear todos los recursos
-  - Para el peering bidireccional, necesitas permisos en ambas VNets
+  - Para crear la VM y asignar roles, necesitas permisos de User Access Administrator o Owner
 
 ## Referencias rápidas
 
@@ -438,4 +449,4 @@ Para más detalles, consulta la [documentación completa de Vault](Vault/README.
 
 ---
 
-Hecho para HashiTalk España 2026. Ajusta nombres/regiones según tu suscripción.
+Hecho para HUG Panama. Ajusta nombres/regiones según tu suscripción.

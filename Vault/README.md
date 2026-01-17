@@ -349,7 +349,7 @@ Antes de comenzar, verifica que tengas:
 
 1. **Navega al directorio Vault**:
    ```powershell
-   cd .\DemoHashiTalkEspana2026\Vault
+   cd .\Vault
    ```
 
 2. **Crea el archivo de configuración desde el ejemplo** (si no existe):
@@ -1273,4 +1273,4 @@ echo $env:TF_VAR_vault_token
 
 ---
 
-**Última actualización**: 2026 (HashiTalk España 2026)
+**Última actualización**: 2026 (HUG Panama)

@@ -1,4 +1,4 @@
-# Infraestructura Terraform - HashiTalk España 2026
+# Infraestructura Terraform - HUG Panama
 
 Este proyecto de Terraform despliega una infraestructura segura en Azure con red privada, endpoints privados y recursos para cargas de trabajo RAG (Retrieval-Augmented Generation).
 
@@ -74,7 +74,7 @@ Este proyecto de Terraform despliega una infraestructura segura en Azure con red
   - [Paso 6: Iniciar y Configurar Vault](#paso-6-iniciar-y-configurar-vault)
   - [Paso 7: Verificar la Configuración](#paso-7-verificar-la-configuración)
   - [Paso 8: Configurar Variables de Terraform](#paso-8-configurar-variables-de-terraform)
-  - [Paso 9: Configurar VNet Peering (Opcional)](#paso-9-configurar-vnet-peering-opcional)
+  - [Paso 9: Configurar Grupo de Azure AD para VM (Requerido)](#paso-9-configurar-grupo-de-azure-ad-para-vm-requerido)
   - [Paso 10: Inicializar Terraform](#paso-10-inicializar-terraform)
   - [Paso 11: Planificar el Despliegue](#paso-11-planificar-el-despliegue)
   - [Paso 12: Aplicar la Configuración](#paso-12-aplicar-la-configuración)
@@ -94,11 +94,12 @@ Este proyecto de Terraform despliega una infraestructura segura en Azure con red
 Esta configuración de Terraform crea una infraestructura de Azure con las siguientes características principales:
 
 - **Red Virtual (VNet)** con subredes dedicadas y grupos de seguridad de red (NSG)
+- **Azure Bastion Host** para acceso seguro a VMs sin exponer puertos RDP/SSH
+- **Virtual Machine Windows** con Azure AD Login habilitado
 - **Storage Account** con acceso privado y endpoints privados para Blob y File
 - **Key Vault** con RBAC habilitado y acceso privado
 - **Private Endpoints** para todos los servicios críticos
 - **Private DNS Zones** para resolución DNS privada
-- **VNet Peering** con una VNet existente para conectividad híbrida
 - **Autenticación mediante HashiCorp Vault** para credenciales de Azure
 
 ## 🏗️ Arquitectura
@@ -109,11 +110,11 @@ La infraestructura implementa una arquitectura de red segura con las siguientes 
 
 #### Virtual Network (VNet)
 - **VNet principal** con espacio de direcciones configurable (por defecto: `10.0.0.0/16`)
-- **Subredes dedicadas**:
-  - `subnet-app`: Para aplicaciones (10.0.1.0/24) con service endpoints para Storage y Key Vault
-  - `subnet-data`: Para datos (10.0.2.0/24) con service endpoints para Storage y SQL
-  - `subnet-ai`: Para servicios de IA (10.0.3.0/24) con service endpoints para Cognitive Services
-  - `subnet-private-endpoints`: Para endpoints privados (10.0.4.0/24)
+- **Subredes dedicadas** (configurables mediante `var.subnets`):
+  - `subnet_bastion`: Para Azure Bastion (requerida)
+  - `subnet_vm`: Para la Virtual Machine
+  - `subnet_private_endpoints`: Para Private Endpoints
+  - Otras subredes según configuración (app, data, ai, etc.)
 
 #### Private Endpoints
 Se crean private endpoints para todos los recursos críticos:
@@ -126,13 +127,14 @@ Zonas DNS privadas con vnet links automáticos:
 - `privatelink.file.core.windows.net` - Storage Files
 - `privatelink.vaultcore.azure.net` - Key Vault
 
-Los vnet links se crean tanto para la VNet local como para la VNet remota (Vnet-Jumpbox).
+Los vnet links se crean para la VNet local.
 
 #### Seguridad de Red
 - **Acceso público deshabilitado** en Storage Account y Key Vault
-- **NSGs** asociados a cada subnet
-- **Service Endpoints** configurados para servicios críticos
-- **VNet Peering** bidireccional con VNet existente
+- **NSGs** asociados a cada subnet (excepto subnet_bastion)
+- **Service Endpoints** configurados opcionalmente para servicios críticos
+- **Azure Bastion** para acceso seguro a VMs sin exponer puertos públicamente
+- **Regla NSG especial** que permite RDP desde la subnet de Bastion a la subnet de VM
 
 ## 📁 Archivos de Configuración
 
@@ -197,8 +199,6 @@ Define todas las variables de entrada para la configuración.
 
 4. **Storage Account:**
    - `storage_account_name`: Nombre de la cuenta de almacenamiento
-   - `container_name`: Nombre del contenedor
-   - `container_access_type`: Tipo de acceso (private, blob, container)
 
 5. **Key Vault:**
    - `key_vault_name`: Nombre del Key Vault
@@ -215,28 +215,36 @@ Define valores locales reutilizables en toda la configuración.
   - Etiquetas adicionales de `var.tags`
 
 ### `random.tf`
-Genera un prefijo aleatorio para nombres de recursos.
+Genera un prefijo aleatorio y una contraseña para la VM.
 
-**Características:**
-- Genera un string de 3 caracteres en minúsculas
-- Sin caracteres especiales ni números
-- Se usa como prefijo para evitar conflictos de nombres en Azure
+**Recursos:**
+
+1. **Random String:**
+   - `random_string.prefix`: Prefijo aleatorio
+     - Longitud: 2 caracteres
+     - Solo letras minúsculas (sin números ni caracteres especiales)
+     - Se usa como prefijo para evitar conflictos de nombres en Azure
+
+2. **Random Password:**
+   - `random_password.vm_admin_password`: Contraseña para la VM
+     - Longitud: 20 caracteres
+     - Incluye mayúsculas, minúsculas, números y caracteres especiales
+     - Caracteres especiales permitidos: `!@#$%&*()-_=+[]{}<>:?`
 
 **Uso:**
 - Storage Account: `${random_string.prefix.result}${var.storage_account_name}`
 - Key Vault: `${random_string.prefix.result}-${var.key_vault_name}`
 - Resource Group: `${random_string.prefix.result}-${var.resource_group_name}`
+- VM Admin Password: `random_password.vm_admin_password.result`
 
 ### `data.tf`
 Define data sources para obtener información de recursos existentes.
 
 **Data Sources:**
-- `azurerm_client_config.current`: Configuración del cliente actual (tenant_id, object_id, etc.)
-- `azurerm_virtual_network.vnet-vm`: VNet existente "Vnet-Jumpbox" en "RG-VM-Jumpbox"
+- `azurerm_client_config.current`: Configuración del cliente actual (tenant_id, object_id, subscription_id, etc.)
 
 **Uso:**
 - `azurerm_client_config`: Para tenant_id en Key Vault y object_id para role assignments
-- `azurerm_virtual_network.vnet-vm`: Para VNet peering y vnet links en Private DNS Zones
 
 ### `resource_group.tf`
 Crea el grupo de recursos de Azure.
@@ -248,7 +256,7 @@ Crea el grupo de recursos de Azure.
   - Tags: `local.etiquetas_comunes`
 
 ### `vnet.tf`
-Crea la red virtual, subredes y grupos de seguridad de red.
+Crea la red virtual, subredes, grupos de seguridad de red y Azure Bastion.
 
 **Recursos:**
 
@@ -259,31 +267,37 @@ Crea la red virtual, subredes y grupos de seguridad de red.
    - `azurerm_subnet.subnet`: Crea subredes dinámicamente usando `for_each = var.subnets`
    - Soporta service endpoints opcionales
    - Soporta delegación de subred opcional
+   - Requiere una subnet llamada `subnet_bastion` para Azure Bastion
 
 3. **Network Security Groups:**
-   - `azurerm_network_security_group.nsg`: NSG para cada subred
+   - `azurerm_network_security_group.nsg`: NSG para cada subred (excepto subnet_bastion)
+   - Regla especial para `subnet_vm`: permite RDP desde la subnet de Bastion
    - `azurerm_subnet_network_security_group_association.nsg_association`: Asociación NSG-Subnet
+
+4. **Public IP for Bastion:**
+   - `azurerm_public_ip.bastion`: IP pública estándar para Azure Bastion
+
+5. **Azure Bastion Host:**
+   - `azurerm_bastion_host.bastion`: Host de Azure Bastion (SKU Basic)
+   - Permite acceso seguro a VMs sin exponer puertos RDP/SSH públicamente
 
 **Características:**
 - Subredes creadas dinámicamente desde la variable `subnets`
 - Cada subred puede tener service endpoints y delegación configurados
-- NSG automático para cada subred
+- NSG automático para cada subred (excepto subnet_bastion)
+- Azure Bastion permite acceso seguro a VMs mediante el navegador
 
 ### `storage.tf`
-Crea la cuenta de almacenamiento y el contenedor.
+Crea la cuenta de almacenamiento con acceso privado.
 
 **Recursos:**
 
 1. **Storage Account:**
-   - `azurerm_storage_account.rag`: Cuenta de almacenamiento
+   - `azurerm_storage_account.storage`: Cuenta de almacenamiento
      - Tier: Standard
      - Replication: LRS (Locally Redundant Storage)
      - **Acceso público deshabilitado** (`public_network_access_enabled = false`)
-     - Nombre con prefijo aleatorio
-
-2. **Storage Container:**
-   - `azurerm_storage_container.rag`: Contenedor dentro de la cuenta
-     - Tipo de acceso configurable (private, blob, container)
+     - Nombre con prefijo aleatorio: `${random_string.prefix.result}${var.storage_account_name}`
 
 ### `key_vault.tf`
 Crea el Key Vault con RBAC habilitado.
@@ -316,12 +330,7 @@ Crea los private endpoints y las Private DNS Zones.
    - `azurerm_private_dns_zone_virtual_network_link.file_link`
    - `azurerm_private_dns_zone_virtual_network_link.keyvault_link`
 
-3. **VNet Links (VNet Remota - Vnet-Jumpbox):**
-   - `azurerm_private_dns_zone_virtual_network_link.blob_link_vm`
-   - `azurerm_private_dns_zone_virtual_network_link.file_link_vm`
-   - `azurerm_private_dns_zone_virtual_network_link.keyvault_link_vm`
-
-4. **Private Endpoints:**
+3. **Private Endpoints:**
    - `azurerm_private_endpoint.storage_blob`: Endpoint para Storage Blob
    - `azurerm_private_endpoint.storage_file`: Endpoint para Storage File
    - `azurerm_private_endpoint.keyvault`: Endpoint para Key Vault
@@ -329,26 +338,40 @@ Crea los private endpoints y las Private DNS Zones.
 **Características:**
 - Todos los endpoints se crean en `subnet-private-endpoints`
 - Cada endpoint incluye un `private_dns_zone_group` para registro DNS automático
-- VNet links creados para ambas VNets (local y remota)
+- VNet links creados para la VNet local
 
-### `peering.tf`
-Configura el peering bidireccional entre VNets.
+### `vm.tf`
+Crea la máquina virtual Windows con Azure AD Login y la configuración de red asociada.
 
 **Recursos:**
 
-1. **Peering Local a Remota:**
-   - `azurerm_virtual_network_peering.vnet_to_vnet_vm`: Desde VNet local a Vnet-Jumpbox
-     - Permite acceso de red virtual
-     - No permite tráfico reenviado
-     - No permite gateway transit
+1. **Network Interface:**
+   - `azurerm_network_interface.vm`: Interfaz de red para la VM
+     - Conectada a `subnet_vm`
+     - IP privada asignada dinámicamente
 
-2. **Peering Remota a Local:**
-   - `azurerm_virtual_network_peering.vnet_vm_to_vnet`: Desde Vnet-Jumpbox a VNet local
-     - Configuración simétrica al peering anterior
+2. **Windows Virtual Machine:**
+   - `azurerm_windows_virtual_machine.vm`: VM Windows Server 2022
+     - Tamaño: Standard_B2s (2 vCPU, 4 GB RAM)
+     - Usuario admin: `azureuser` (requerido pero no usado con Azure AD)
+     - Contraseña: Generada aleatoriamente por `random_password.vm_admin_password`
+     - Disco OS: Premium_LRS
+     - Identity: SystemAssigned (para Azure AD login)
+
+3. **VM Extension:**
+   - `azurerm_virtual_machine_extension.aad_login`: Extensión AADLoginForWindows
+     - Versión: 2.2
+     - Habilita login con Azure AD
+
+4. **Role Assignment:**
+   - `azurerm_role_assignment.vm_user_login`: Asigna rol "Virtual Machine User Login"
+     - Principal: Grupo de Azure AD especificado en `var.vm_azure_ad_group_object_id`
+     - Permite a miembros del grupo iniciar sesión en la VM
 
 **Características:**
-- Peering bidireccional para permitir comunicación en ambas direcciones
-- Configuración de seguridad para controlar el tráfico
+- Acceso a la VM mediante Azure Bastion (sin exponer RDP públicamente)
+- Login con Azure AD (sin necesidad de contraseñas locales)
+- Contraseña admin generada automáticamente y almacenada en el estado de Terraform
 
 ### `outputs.tf`
 Define los valores de salida de la configuración.
@@ -368,13 +391,33 @@ Define los valores de salida de la configuración.
    - `vnet_id`: ID de la VNet
    - `vnet_name`: Nombre de la VNet
 
-5. **Private Endpoints:**
+5. **Azure Bastion:**
+   - `bastion_host_id`: ID del Azure Bastion Host
+   - `bastion_host_name`: Nombre del Azure Bastion Host
+   - `bastion_public_ip`: Dirección IP pública del Azure Bastion Host
+
+6. **Virtual Machine:**
+   - `vm_id`: ID de la Virtual Machine
+   - `vm_name`: Nombre de la Virtual Machine
+   - `vm_private_ip`: Dirección IP privada de la Virtual Machine
+   - `vm_identity_principal_id`: Principal ID de la identidad asignada del sistema de la VM
+
+7. **Private Endpoints:**
    - `private_endpoint_storage_blob_id`: ID del endpoint de Storage Blob
    - `private_endpoint_storage_file_id`: ID del endpoint de Storage File
    - `private_endpoint_keyvault_id`: ID del endpoint de Key Vault
 
-6. **Private DNS Zones:**
+8. **Private DNS Zones:**
    - `private_dns_zones`: Mapa con nombres de las zonas DNS privadas
+
+### `vm.tf`
+Crea la máquina virtual Windows con Azure AD Login.
+
+**Recursos:**
+- Network Interface para la VM
+- Windows Virtual Machine (Standard_B2s, Windows Server 2022)
+- VM Extension para Azure AD Login
+- Role Assignment para acceso de grupo de Azure AD
 
 ### `main.tf`
 Archivo de referencia que indica que los recursos están organizados en archivos individuales.
@@ -388,15 +431,22 @@ La configuración crea los siguientes recursos en Azure:
 1. **Resource Group** (1)
 2. **Virtual Network** (1)
 3. **Subnets** (N, según configuración)
-4. **Network Security Groups** (N, uno por subnet)
-5. **Storage Account** (1)
-6. **Storage Container** (1)
-7. **Key Vault** (1)
-8. **Role Assignment** (1, para Key Vault)
-9. **Private DNS Zones** (3)
-10. **Private DNS Zone VNet Links** (6, 3 para cada VNet)
-11. **Private Endpoints** (3)
-12. **VNet Peerings** (2, bidireccional)
+4. **Network Security Groups** (N, uno por subnet, excluyendo subnet_bastion)
+5. **NSG Associations** (N, asociando NSGs a subnets)
+6. **Public IP** (1, para Azure Bastion)
+7. **Azure Bastion Host** (1, SKU Basic)
+8. **Network Interface** (1, para la VM)
+9. **Windows Virtual Machine** (1, Standard_B2s, Windows Server 2022)
+10. **VM Extension** (1, AADLoginForWindows)
+11. **Role Assignment - VM User Login** (1)
+12. **Storage Account** (1, acceso público deshabilitado)
+13. **Key Vault** (1, RBAC habilitado, acceso público deshabilitado)
+14. **Role Assignment - Key Vault Admin** (1)
+15. **Private DNS Zones** (3: blob, file, keyvault)
+16. **Private DNS Zone VNet Links** (3, para la VNet local)
+17. **Private Endpoints** (3: Storage Blob, Storage File, Key Vault)
+18. **Random String** (1, prefijo para nombres de recursos)
+19. **Random Password** (1, contraseña para la VM)
 
 ## 📋 Prerrequisitos
 
@@ -406,7 +456,7 @@ Antes de usar esta configuración, necesitas instalar y configurar las siguiente
 2. **Azure CLI**
 3. **HashiCorp Vault**
 4. **Service Principal de Azure** con permisos adecuados
-5. **VNet existente** (opcional, para peering)
+5. **Grupo de Azure AD** (para acceso a la VM)
 
 ## 🚀 Configuración desde Cero
 
@@ -694,20 +744,15 @@ vault version
    vnet_address_space = ["10.0.0.0/16"]
    
    subnets = {
-     subnet_app = {
-       name              = "subnet-app"
+     subnet_bastion = {
+       name              = "AzureBastionSubnet"  # Nombre requerido para Azure Bastion
+       address_prefixes  = ["10.0.0.0/26"]      # Mínimo /26 para Azure Bastion
+       service_endpoints = []
+     }
+     subnet_vm = {
+       name              = "subnet-vm"
        address_prefixes  = ["10.0.1.0/24"]
-       service_endpoints = ["Microsoft.Storage", "Microsoft.KeyVault"]
-     }
-     subnet_data = {
-       name              = "subnet-data"
-       address_prefixes  = ["10.0.2.0/24"]
-       service_endpoints = ["Microsoft.Storage", "Microsoft.Sql"]
-     }
-     subnet_ai = {
-       name              = "subnet-ai"
-       address_prefixes  = ["10.0.3.0/24"]
-       service_endpoints = ["Microsoft.CognitiveServices"]
+       service_endpoints = []
      }
      subnet_private_endpoints = {
        name              = "subnet-private-endpoints"
@@ -718,32 +763,42 @@ vault version
    
    ##### Variables - Storage Account #####
    storage_account_name  = "ragstorageaccount"  # Solo minúsculas y números, 3-24 caracteres
-   container_name        = "rag-container"
-   container_access_type = "private"
    
    ##### Variables - Key Vault #####
    key_vault_name = "rag-key-vault"  # Solo letras, números y guiones
    key_vault_sku  = "standard"
+   
+   ##### Variables - Virtual Machine #####
+   vm_azure_ad_group_object_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # Object ID del grupo de Azure AD
    ```
 
    **Notas importantes:**
    - `storage_account_name`: Debe ser único globalmente, solo minúsculas y números, entre 3-24 caracteres
    - `key_vault_name`: Solo letras, números y guiones, debe ser único globalmente
-   - `vnet_address_space`: No debe solaparse con otras VNets si planeas hacer peering
+   - `vnet_address_space`: Espacio de direcciones para la VNet
 
-### Paso 9: Configurar VNet Peering (Opcional)
+### Paso 9: Configurar Grupo de Azure AD para VM (Requerido)
 
-Si necesitas hacer peering con una VNet existente:
+Para que los usuarios puedan iniciar sesión en la VM con Azure AD, necesitas:
 
-1. **Editar `data.tf`:**
-   ```hcl
-   data "azurerm_virtual_network" "vnet-vm" {
-     name                = "Vnet-Jumpbox"  # Cambia por el nombre de tu VNet
-     resource_group_name = "RG-VM-Jumpbox"  # Cambia por tu Resource Group
-   }
+1. **Crear o identificar un grupo de Azure AD:**
+   ```powershell
+   # Listar grupos existentes
+   az ad group list --display-name "VM-Users" --query "[].{Name:displayName, ObjectId:id}" -o table
+   
+   # O crear un nuevo grupo
+   az ad group create --display-name "VM-Users" --mail-nickname "VMUsers"
    ```
 
-2. **Si no necesitas peering, puedes comentar o eliminar esta sección en `peering.tf` y `private_endpoints.tf`**
+2. **Obtener el Object ID del grupo:**
+   ```powershell
+   az ad group show --group "VM-Users" --query id -o tsv
+   ```
+
+3. **Agregar el Object ID a `terraform.tfvars`:**
+   ```hcl
+   vm_azure_ad_group_object_id = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+   ```
 
 ### Paso 10: Inicializar Terraform
 
@@ -930,8 +985,8 @@ subnets = {
 | Variable | Tipo | Descripción | Default |
 |----------|------|-------------|---------|
 | `storage_account_name` | `string` | Nombre de la cuenta de almacenamiento | *requerido* |
-| `container_name` | `string` | Nombre del contenedor | *requerido* |
-| `container_access_type` | `string` | Tipo de acceso (private, blob, container) | `"private"` |
+
+**Nota:** Las variables `container_name` y `container_access_type` ya no se usan en la configuración actual.
 
 ### Variables de Key Vault
 
@@ -939,6 +994,12 @@ subnets = {
 |----------|------|-------------|---------|
 | `key_vault_name` | `string` | Nombre del Key Vault | *requerido* |
 | `key_vault_sku` | `string` | SKU (standard o premium) | `"standard"` |
+
+### Variables de Virtual Machine
+
+| Variable | Tipo | Descripción | Default |
+|----------|------|-------------|---------|
+| `vm_azure_ad_group_object_id` | `string` | Object ID del grupo de Azure AD con acceso a la VM | *requerido* |
 
 ## 📤 Outputs
 
@@ -949,6 +1010,13 @@ subnets = {
 | `key_vault_uri` | URI del Key Vault |
 | `vnet_id` | ID de la Virtual Network |
 | `vnet_name` | Nombre de la Virtual Network |
+| `bastion_host_id` | ID del Azure Bastion Host |
+| `bastion_host_name` | Nombre del Azure Bastion Host |
+| `bastion_public_ip` | Dirección IP pública del Azure Bastion Host |
+| `vm_id` | ID de la Virtual Machine |
+| `vm_name` | Nombre de la Virtual Machine |
+| `vm_private_ip` | Dirección IP privada de la Virtual Machine |
+| `vm_identity_principal_id` | Principal ID de la identidad asignada del sistema de la VM |
 | `private_endpoint_storage_blob_id` | ID del private endpoint de Storage Blob |
 | `private_endpoint_storage_file_id` | ID del private endpoint de Storage File |
 | `private_endpoint_keyvault_id` | ID del private endpoint de Key Vault |
@@ -979,7 +1047,8 @@ subnets = {
 - [azurerm_key_vault](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/key_vault)
 - [azurerm_private_endpoint](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/private_endpoint)
 - [azurerm_private_dns_zone](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/private_dns_zone)
-- [azurerm_virtual_network_peering](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/virtual_network_peering)
+- [azurerm_windows_virtual_machine](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/windows_virtual_machine)
+- [azurerm_bastion_host](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/bastion_host)
 - [azurerm_role_assignment](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/role_assignment)
 
 ### Data Sources
@@ -1093,24 +1162,36 @@ storage_account_name = "nuevonombreunico123"
 key_vault_name = "nuevo-key-vault-nombre-123"
 ```
 
-### Error: "VNet peering failed" o "Virtual network not found"
+### Error: "Subnet name must be AzureBastionSubnet" o "Bastion subnet size"
 
-**Causa:** La VNet remota no existe o los nombres son incorrectos.
+**Causa:** La subnet de Bastion debe tener un nombre y tamaño específicos.
 
 **Solución:**
 ```bash
-# 1. Verificar que la VNet existe:
-az network vnet show \
-  --name "Vnet-Jumpbox" \
-  --resource-group "RG-VM-Jumpbox"
-
-# 2. Si no existe o tiene otro nombre, editar data.tf:
-data "azurerm_virtual_network" "vnet-vm" {
-  name                = "<TU_VNET_NAME>"
-  resource_group_name = "<TU_RESOURCE_GROUP>"
+# 1. Verificar que la subnet de Bastion está configurada correctamente en terraform.tfvars:
+subnets = {
+  subnet_bastion = {
+    name              = "AzureBastionSubnet"  # Nombre exacto requerido
+    address_prefixes  = ["10.0.0.0/26"]      # Mínimo /26 (64 direcciones)
+    service_endpoints = []
+  }
+  # ... otras subnets
 }
+```
 
-# 3. Si no necesitas peering, comentar las secciones en peering.tf
+### Error: "VM Azure AD group not found" o "Invalid principal ID"
+
+**Causa:** El Object ID del grupo de Azure AD es incorrecto o el grupo no existe.
+
+**Solución:**
+```bash
+# 1. Verificar que el grupo existe:
+az ad group show --group "<NOMBRE_GRUPO>" --query id -o tsv
+
+# 2. Si no existe, crear el grupo:
+az ad group create --display-name "VM-Users" --mail-nickname "VMUsers"
+
+# 3. Actualizar terraform.tfvars con el Object ID correcto
 ```
 
 ### Error: "Authentication failed" o "Invalid credentials"
@@ -1218,7 +1299,7 @@ terraform init -migrate-state
 
 - El prefijo aleatorio se genera una vez y se mantiene en el estado de Terraform
 - Los Private DNS Zones se crean en el mismo Resource Group que los recursos principales
-- El VNet Peering requiere permisos en ambas VNets
+- El Role Assignment para la VM requiere permisos de User Access Administrator o Owner
 - El Role Assignment para Key Vault se crea automáticamente para el usuario actual
 
 ## 💡 Mejores Prácticas
@@ -1326,7 +1407,7 @@ terraform destroy \
 ### Consideraciones Importantes
 
 1. **Private Endpoints:** Se destruyen automáticamente con los recursos asociados
-2. **VNet Peering:** Requiere permisos en ambas VNets para destruir
+2. **Azure Bastion:** Se destruye automáticamente con la VNet
 3. **Key Vault:** Si tiene purge protection, puede requerir pasos adicionales
 4. **Estado de Terraform:** El archivo de estado se mantiene después de `destroy`
 
@@ -1408,7 +1489,7 @@ terraform destroy \
 
 ## 👥 Contribuciones
 
-Este proyecto es parte de la presentación para HashiTalk España 2026.
+Este proyecto es parte de la presentación para HUG Panama.
 
 ---
 
